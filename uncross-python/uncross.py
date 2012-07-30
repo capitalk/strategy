@@ -112,6 +112,14 @@ def receive_order_updates(order_addr, order_port):
     print msg_parts
     gevent.sleep(0)
 
+HELLO_ACK = 0xF1
+
+def say_hello(venue_id):
+  STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022' 
+  HELLO = 0xF0
+  socket.send([venue_id, HELLO, STRATEGY_ID])
+
+
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
 parser.add_argument('--market-data-addr', type=str, default='tcp://127.0.0.1', dest = 'md_addr')
