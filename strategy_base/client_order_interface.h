@@ -26,11 +26,11 @@ class ClientOrderInterface
 		//int run();
 		//void stop();
 		
-		const std::string& getInterfaceAddr() const { return _interfaceAddr;}
-		const std::string& getInproAddr() const { return _inprocAddr;}
-		const int getInterfaceID() const { return _interfaceID;}
-		zmq::socket_t* getInterfaceSocket() { return _interface;}
-		zmq::socket_t* getInprocSocket() { return _inproc;}
+		inline const std::string& getInterfaceAddr() const { return _interfaceAddr;}
+		inline const std::string& getInprocAddr() const { return _inprocAddr;}
+		inline const int getInterfaceID() const { return _interfaceID;}
+		inline zmq::socket_t* getInterfaceSocket() { return _interface;}
+		inline zmq::socket_t* getInprocSocket() { return _inproc;}
 
 	private:
 		int _interfaceID;
