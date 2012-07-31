@@ -52,30 +52,32 @@ order_map_t completedOrders;
 
 void list_orders();
 
-capkproto::new_order_single
-create_order(const strategy_id_t& sid,
+//capkproto::new_order_single
+void
+create_order(capkproto::new_order_single* nos, 
+                const strategy_id_t& sid,
                 const char* symbol, 
 				capk::Side_t side,
 				double quantity,
 				double price) 
 {
-
+    assert(nos);
 	pan::log_DEBUG("create_order()");
-	capkproto::new_order_single nos;
-	nos.set_strategy_id(sid.get_uuid(), sid.size());
-	nos.set_symbol(symbol);
+	//capkproto::new_order_single nos;
+	nos->set_strategy_id(sid.get_uuid(), sid.size());
+	nos->set_symbol(symbol);
 	if (side == capk::BID) {
-		nos.set_side(capkproto::BID);
+		nos->set_side(capkproto::BID);
 	}
 	else if (side == capk::ASK) {
-		nos.set_side(capkproto::ASK);
+		nos->set_side(capkproto::ASK);
 	}
-	nos.set_order_qty(quantity);
-	nos.set_price(price);
+	nos->set_order_qty(quantity);
+	nos->set_price(price);
 
-	nos.set_ord_type(capkproto::LIM);
-	nos.set_time_in_force(capkproto::GFD);
-	return nos;
+	nos->set_ord_type(capkproto::LIM);
+	nos->set_time_in_force(capkproto::GFD);
+	//return nos;
 }	
 
 

@@ -54,8 +54,10 @@ order_map_t completedOrders;
 */
 void list_orders();
 
-capkproto::new_order_single
-create_order(const strategy_id_t& sid,
+//capkproto::new_order_single
+void
+create_order(capkproto::new_order_single* nos, 
+                const strategy_id_t& sid,
                 const char* symbol, 
 				capk::Side_t side,
 				double quantity,
