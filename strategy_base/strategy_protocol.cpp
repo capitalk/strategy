@@ -11,9 +11,9 @@ snd_HELO(zmq::socket_t* order_interface,
 */
 	bool rc;
 	pan::log_DEBUG("Sending venueID");
-	zmq::message_t iid(sizeof(venueID));
-	memcpy(iid.data(), &venueID, sizeof(venueID));
-	rc = order_interface->send(iid, ZMQ_SNDMORE);
+	zmq::message_t venue_id_msg(sizeof(venueID));
+	memcpy(venue_id_msg.data(), &venueID, sizeof(venueID));
+	rc = order_interface->send(venue_id_msg, ZMQ_SNDMORE);
 
 	pan::log_DEBUG("sending HELO msg type");
 	zmq::message_t msg_helo(sizeof(capk::STRATEGY_HELO));
@@ -61,10 +61,10 @@ snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface,
 	memcpy(msg.data(), msgbuf, msgsize);
 
 	// send the interface id to the mux
-	zmq::message_t iid(sizeof(venueID));
-	memcpy(iid.data(), &venueID, sizeof(venueID));
+	zmq::message_t venue_id_msg(sizeof(venueID));
+	memcpy(venue_id_msg.data(), &venueID, sizeof(venueID));
 	pan::log_DEBUG("CANCEL REPLACE: Sending venueID: ", pan::integer(venueID));
-	rc = order_interface->send(iid, ZMQ_SNDMORE);
+	rc = order_interface->send(venue_id_msg, ZMQ_SNDMORE);
 
 	// send the message type 
 	capk::msg_t order_cancel_replace = capk::ORDER_REPLACE;
@@ -120,10 +120,10 @@ snd_ORDER_CANCEL(zmq::socket_t* order_interface,
 	memcpy(msg.data(), msgbuf, msgsize);
 
 	// send the interface id to the mux
-	zmq::message_t iid(sizeof(venueID));
-	memcpy(iid.data(), &venueID, sizeof(venueID));
+	zmq::message_t venue_id_msg(sizeof(venueID));
+	memcpy(venue_id_msg.data(), &venueID, sizeof(venueID));
 	pan::log_DEBUG("CANCEL: Sending venueID: ", pan::integer(venueID));
-	rc = order_interface->send(iid, ZMQ_SNDMORE);
+	rc = order_interface->send(venue_id_msg, ZMQ_SNDMORE);
 
 	// send the message type 
 	capk::msg_t order_cancel = capk::ORDER_CANCEL;
@@ -181,10 +181,10 @@ snd_NEW_ORDER(zmq::socket_t* order_interface,
 	memcpy(msg.data(), msgbuf, msgsize);
 
 	// send the interface id to the mux
-	zmq::message_t iid(sizeof(venueID));
-	memcpy(iid.data(), &venueID, sizeof(venueID));
+	zmq::message_t venue_id_msg(sizeof(venueID));
+	memcpy(venue_id_msg.data(), &venueID, sizeof(venueID));
 	//pan::log_DEBUG("Sending venueID: ", pan::integer(venueID));
-	rc = order_interface->send(iid, ZMQ_SNDMORE);
+	rc = order_interface->send(venue_id_msg, ZMQ_SNDMORE);
 
 	// send the message type 
 	capk::msg_t order_new = capk::ORDER_NEW;
