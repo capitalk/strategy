@@ -108,18 +108,23 @@ OrderMux::run()
 					// lookup the socket for the venue
 					zmq::socket_t* venue_sock = NULL;
 					int venue_id = *(static_cast<int*>(venue_id_msg.data()));
-					//pan::log_DEBUG("OMUX received msg for iterface id: ", pan::integer(venue_id));
+#ifdef LOG
+					pan::log_DEBUG("OMUX (outbound) received msg for iterface id: ", pan::integer(venue_id));
+#endif
 
 					size_t sockIdx;
 					for (sockIdx = 0; sockIdx < _oiArraySize; sockIdx++) {
 						if (_oiArray[sockIdx]->getInterfaceID() == venue_id) {
 							venue_sock = _oiArray[sockIdx]->getInterfaceSocket();
 							assert(venue_sock);
-							//pan::log_DEBUG("OMUX found interface socket for id: ", pan::integer(venue_id));
+#ifdef LOG
+							pan::log_DEBUG("OMUX (outbound) found interface socket for id: ", pan::integer(venue_id));
+							pan::log_DEBUG("OMUX (outbound) interface has the following attributes:\n", "Interface address: ", _oiArray[sockIdx]->getInterfaceAddr().c_str(), "\n", "Inproc address: ", _oiArray[sockIdx]->getInprocAddr().c_str(), "\n");
+#endif
 						}
 					}
 					if (sockIdx > _oiArraySize) {
-						pan::log_CRITICAL("OMUX cant find interface for id: ", pan::integer(venue_id));
+						pan::log_CRITICAL("OMUX (outbound) cant find interface for id: ", pan::integer(venue_id), " MSG NOT SENT!");
 					}
 
 				do {
