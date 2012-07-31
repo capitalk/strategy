@@ -48,7 +48,9 @@ Order::set(const capkproto::execution_report& er)
 {
     _oid.set(er.cl_order_id().c_str(), er.cl_order_id().size());
     //_oid.parse(er.cl_order_id().c_str());
-    _origClOid.set(er.orig_cl_order_id().c_str(), er.orig_cl_order_id().size());
+    if (er.has_orig_cl_order_id()) {
+        _origClOid.set(er.orig_cl_order_id().c_str(), er.orig_cl_order_id().size());
+    }
     //_origClOid.parse(er.orig_cl_order_id().c_str());
     memcpy(_execId, er.exec_id().c_str(), er.exec_id().size());
     _execTransType = static_cast<capk::ExecTransType_t>(er.exec_trans_type());
