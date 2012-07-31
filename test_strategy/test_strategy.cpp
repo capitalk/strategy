@@ -311,16 +311,16 @@ receiveBBOMarketData(zmq::socket_t* sock)
                 instrument_bbo_protobuf.symbol(), 
                 instrument_bbo_protobuf.DebugString());
 
-        bbo_book.bid_venue_id = instrument_bbo_protobuf.bb_venue_id();
-        bbo_book.bid_price = instrument_bbo_protobuf.bb_price();
-        bbo_book.bid_size = instrument_bbo_protobuf.bb_size();
+        bbo_book.bid_venue_id = instrument_bbo_protobuf.bid_venue_id();
+        bbo_book.bid_price = instrument_bbo_protobuf.bid_price();
+        bbo_book.bid_size = instrument_bbo_protobuf.bid_size();
         clock_gettime(CLOCK_MONOTONIC, &bbo_book.bid_last_update);
 
         // TODO FIX THIS to be int id for mic rather than string	
         // OK - 20120717
-        bbo_book.ask_venue_id = instrument_bbo_protobuf.ba_venue_id();
-        bbo_book.ask_price = instrument_bbo_protobuf.ba_price();
-        bbo_book.ask_size = instrument_bbo_protobuf.ba_size();
+        bbo_book.ask_venue_id = instrument_bbo_protobuf.ask_venue_id();
+        bbo_book.ask_price = instrument_bbo_protobuf.ask_price();
+        bbo_book.ask_size = instrument_bbo_protobuf.ask_size();
         clock_gettime(CLOCK_MONOTONIC, &bbo_book.ask_last_update);
         return true;
     }
@@ -495,7 +495,7 @@ main(int argc, char **argv)
         int ret;
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("APP Polling pair sockets in app thread");
-            ret = zmq::poll(pollItems, 2, 1000000);
+            ret = zmq::poll(pollItems, 2, 0);
             // receive market data
             if (shouldPrompt) {
                 std::cout << "Enter action (n=new; c=cancel; r=replace; q=quit; l=list ): " << std::endl;
