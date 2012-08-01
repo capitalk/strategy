@@ -11,10 +11,12 @@ class ClientOrderInterface
 		ClientOrderInterface(const int venueID,
 							zmq::context_t* context, 
 							const std::string& interfaceAddr, 
+							const std::string& pingAddr, 
 							const std::string& inprocAddr):
 		_interfaceID(venueID),
 		_context(context), 
 		_interfaceAddr(interfaceAddr),
+		_pingAddr(pingAddr),
 		_inprocAddr(inprocAddr),
 		_stopRequested(false),
 		_initComplete(false)
@@ -26,7 +28,9 @@ class ClientOrderInterface
 		//int run();
 		//void stop();
 		
+        inline zmq::context_t* getContext() const { return _context;}
 		inline const std::string& getInterfaceAddr() const { return _interfaceAddr;}
+		inline const std::string& getPingAddr() const { return _pingAddr;}
 		inline const std::string& getInprocAddr() const { return _inprocAddr;}
 		inline const int getInterfaceID() const { return _interfaceID;}
 		inline zmq::socket_t* getInterfaceSocket() { return _interface;}
@@ -37,6 +41,7 @@ class ClientOrderInterface
 		zmq::context_t* _context;
 
 		std::string _interfaceAddr;
+		std::string _pingAddr;
 		zmq::socket_t* _interface;
 
 		std::string _inprocAddr;

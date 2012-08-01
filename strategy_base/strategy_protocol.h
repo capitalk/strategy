@@ -43,15 +43,9 @@ int snd_HELO(zmq::socket_t* order_interface,
         strategy_id_t& strategy_id,
         const capk::venue_id_t venueID);
 
-int 
-snd_HELO(zmq::socket_t* direct_order_interface, 
-        const char* interface_addr, 
-        strategy_id_t& strategy_id, 
-        const capk::venue_id_t venue_id);
-
-int
-rcv_HELO(zmq::socket_t* direct_order_interface, 
-        const capk::venue_id_t& venue_id);
+int PING(zmq::context_t* pzmq_ctx, 
+        const char* ping_interface_addr, 
+        const int64_t ping_timeout_micros);
 
 void snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id,

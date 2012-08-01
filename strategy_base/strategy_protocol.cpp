@@ -41,89 +41,50 @@ snd_HELO(zmq::socket_t* order_interface,
 	return 0;
 }
 
-int
-rcv_HELO(zmq::socket_t* direct_order_interface, 
-        const capk::venue_id_t& vid)
-{
-    capk::msg_t msg_type = -1;
-    capk::venue_id_t venue_id = capk::kNULL_VENUE_ID;
-    int64_t more = 0;
-    size_t more_size = sizeof(more);
-    do {
-
-        zmq::message_t msg_type_frame;
-        direct_order_interface->recv(&msg_type_frame, 0);
-        msg_type = (*(static_cast<capk::msg_t*>(msg_type_frame.data())));
-        pan::log_DEBUG("rcv_HELO received msg type: ", 
-                pan::integer(msg_type));
-
-
-        zmq::message_t msg_data_frame;
-        direct_order_interface->recv(&msg_data_frame, 0);
-        pan::log_DEBUG("rcv_HELO received msg data: ", 
-                pan::blob(msg_data_frame.data(), msg_data_frame.size()));
-        venue_id = (*(static_cast<capk::venue_id_t*>(msg_type_frame.data())));
-
-        direct_order_interface->getsockopt(ZMQ_RCVMORE, &more, &more_size);
-
-        if (more != 0) {
-            return -1;
-        }
-
-    } while ( more != 0);
-    
-    if (venue_id == vid) {
-        pan::log_DEBUG("VENUE_IDS MATCH!!!!");
-    }
-    return 0; 
-}
 
 /* 
- * Send SYNCHRONOUS HELO msg - above is _asynchronous_
+ * Send SYNCHRONOUS PING msg  
  */
 int 
-snd_HELO(zmq::socket_t* direct_order_interface, 
-        const char* interface_addr, 
-        strategy_id_t& strategy_id, 
-        const capk::venue_id_t venue_id) {
+PING(zmq::context_t* pzmq_ctx, 
+        const char* interface_ping_addr, 
+        const int64_t poll_timeout_us)
+{
 
-	// Send the HELO msg to set the route
-   
+    assert(pzmq_ctx);
+    assert(interface_ping_addr && *interface_ping_addr);
+
 	bool rc;
-	pan::log_DEBUG("sending HELO msg type (sync)");
-	zmq::message_t msg_helo(sizeof(capk::STRATEGY_HELO));
-	memcpy(msg_helo.data(), &capk::STRATEGY_HELO, sizeof(capk::STRATEGY_HELO));
-	rc = direct_order_interface->send(msg_helo, ZMQ_SNDMORE);
-
-	pan::log_DEBUG("sending HELO msg body (sync)", pan::blob(strategy_id.get_uuid(), strategy_id.size()));
-	zmq::message_t msg_sid(strategy_id.size());
-	memcpy(msg_sid.data(), strategy_id.uuid(), strategy_id.size());
-	rc = direct_order_interface->send(msg_sid, 0);
+    zmq::socket_t ping_sock(*pzmq_ctx, ZMQ_REQ);  
+#ifdef LOG
+	pan::log_DEBUG("snd_PING connecting to ping interface on: ",
+            interface_ping_addr);
+#endif
+    ping_sock.connect(interface_ping_addr);
+	zmq::message_t ping_frame(sizeof(capk::PING));
+	memcpy(ping_frame.data(), &capk::PING, sizeof(capk::PING));
+	pan::log_DEBUG("Sending PING msg type");
+	rc = ping_sock.send(ping_frame, 0);
 
     zmq::pollitem_t poll_items[] = {
-        {*direct_order_interface, NULL, ZMQ_POLLIN, 0}
+        {ping_sock, NULL, ZMQ_POLLIN, 0}
     };
     int ret = -1;
     while (1) {
-        ret = zmq::poll(poll_items, 1, 10000000);
+        ret = zmq::poll(poll_items, 1, poll_timeout_us);
         if (ret == -1 || ret == 0) {
             return -1;
         }
         if (poll_items[0].revents & ZMQ_POLLIN) {
-            int rcvOK = rcv_HELO(direct_order_interface, venue_id);
-            assert(rcvOK == 0);
+            zmq::message_t msg_type_frame;
+            ping_sock.recv(&msg_type_frame, 0);
+            capk::msg_t msg_type = (*(static_cast<capk::msg_t*>(msg_type_frame.data())));
+            pan::log_DEBUG("Received ping response: ", 
+                pan::integer(msg_type));
+            return 0;
         }
     }
-/*	
-	pan::log_DEBUG("waiting for HELO ACK");
-	zmq::message_t msg_helo_ack;
-	rc = order_interface->recv(&msg_helo_ack, 0); 
-	zmq_getsockopt(*order_interface, ZMQ_RCVMORE, &more, &more_size);
-	assert(more == 0);
-	pan::log_DEBUG("rcvd for HELO ACK");
-*/	
-
-	return 0;
+	return -1;
 }
 
 

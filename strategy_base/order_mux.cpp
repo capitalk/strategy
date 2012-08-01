@@ -1,5 +1,6 @@
 #include "order_mux.h"
 #include "msg_types.h"
+#include "strategy_protocol.h"
 
 #include "proto/execution_report.pb.h"
 #include "proto/order_cancel_reject.pb.h"
@@ -46,10 +47,25 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi)
     if (!oi) { 
         return false;
     }
-    if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
-        _oiArray[_oiArraySize] = oi;	
-        _oiArraySize++;
-        return true;
+    const int ping_timeout_us = 1000;
+
+    int pingOK = PING(oi->getContext(), 
+            oi->getPingAddr().c_str(), 
+            ping_timeout_us);
+
+    if (pingOK != 0) {
+        pan::log_CRITICAL("PING failed to: ", 
+                oi->getPingAddr().c_str(), 
+                " with timeout (us): ", 
+                pan::integer(ping_timeout_us), 
+                " NOT ADDING INTERFACE");
+    }
+    else {
+        if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
+            _oiArray[_oiArraySize] = oi;	
+            _oiArraySize++;
+            return true;
+        }
     }
     return false;
 }

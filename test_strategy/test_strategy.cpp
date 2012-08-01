@@ -351,36 +351,32 @@ init()
 	OrderMux* ptr_order_mux = new OrderMux(&ctx, 
 				 ORDER_MUX);
 
-
-    zmq::socket_t* direct_interface_socket = new zmq::socket_t(ctx, ZMQ_REQ);
-	// send helo msg to each exchange we're connecting to
-    // KTK TODO - SHOULD WAIT FOR ACK!!!!
-    direct_interface_socket->connect(capk::kFXCM_ORDER_INTERFACE_ADDR);
-	int heloOK = snd_HELO(direct_interface_socket, 
-            capk::kFXCM_ORDER_INTERFACE_ADDR,
-            sid, 
-            capk::kFXCM_VENUE_ID); 
-  
-    pan::log_DEBUG("snd_HELO returned: ", pan::integer(heloOK));
-    char ch;
-    std::cin >> ch;
     capk::ClientOrderInterface* ptr_fxcm_order_interface 
         = new capk::ClientOrderInterface(capk::kFXCM_VENUE_ID, 
 								&ctx, 
 								capk::kFXCM_ORDER_INTERFACE_ADDR,	
+								capk::kFXCM_ORDER_PING_ADDR,	
 								ORDER_MUX);
 
 	//capk::ClientOrderInterface if_XCDE(kXCDE_VENUE_ID, 
 								//&ctx, 
-								//kXCDE_ORDER_INTERFACE_ADDR,
+								//capk::kXCDE_ORDER_INTERFACE_ADDR,
+								//capk::kXCDE_ORDER_PING_ADDR,
 								//ORDER_MUX);
-	
+    	
+    /*
+    int pingOK = PING(&ctx, 
+	    ptr_fxcm_order_interface->getPingAddr().c_str(),
+        1000);
+    assert(pingOK == 0);
+    */
 	// add interfaces
 	ptr_fxcm_order_interface->init();
 	bool addOK = ptr_order_mux->addOrderInterface(ptr_fxcm_order_interface);
     assert(addOK);
 	// run the order mux
 	boost::thread* t0 = new boost::thread(boost::bind(&OrderMux::run, ptr_order_mux));
+    pan::log_DEBUG("Sleeping 2");
 	sleep(2);
 	// connect the thread local pair socket for order data 
 	pOEInterface = new zmq::socket_t(ctx, ZMQ_PAIR);
@@ -394,6 +390,9 @@ init()
         std::cerr << "EXCEPTION MUTHAFUCKA(1)! " <<  err.what() << "(" << err.num() << ")" << std::endl;
     }
 
+	// send helo msg to each exchange we're connecting to
+    // KTK TODO - SHOULD WAIT FOR ACK!!!!
+	snd_HELO(pOEInterface, sid, capk::kFXCM_VENUE_ID); 
 	//snd_HELO(pOEInterface, sid, kXCDE_VENUE_ID); 
   
  
@@ -417,6 +416,7 @@ init()
     assert(addOK);
     // run the market data mux
     boost::thread* t1 = new boost::thread(boost::bind(&MarketDataMux::run, ptr_market_data_mux));
+    pan::log_DEBUG("Sleeping 2");
     sleep(2);
     // connect the thread local pair socket for market data
     pMDInterface = new zmq::socket_t(ctx, ZMQ_PAIR);
@@ -505,7 +505,7 @@ main(int argc, char **argv)
         int ret;
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("APP Polling pair sockets in app thread");
-            ret = zmq::poll(pollItems, 2, 0);
+            ret = zmq::poll(pollItems, 2, -1);
             // receive market data
             if (shouldPrompt) {
                 std::cout << "Enter action (n=new; c=cancel; r=replace; q=quit; l=list ): " << std::endl;
