@@ -3,6 +3,7 @@ import gevent
 import zmq 
 import time 
 import collections
+from fix_constants import ORDER_STATUS
 import order_engine_constants
 
 context = zmq.Context()
@@ -19,6 +20,64 @@ symbols_to_offers = {}
 # 'find_best_crossed_pair' ran 
 updated_symbols = set([])
 
+
+"""
+message execution_report {
+    optional bytes      cl_order_id = 1;
+    optional bytes      orig_cl_order_id = 2;
+    optional string     exec_id = 3;
+    optional sfixed32   exec_trans_type = 4;
+    optional sfixed32   order_status = 5;
+    optional sfixed32   exec_type = 6;
+    optional string     symbol = 7;
+    optional string     security_type = 8;
+    optional side_t     side = 9;
+    optional double     order_qty = 10;
+    optional sfixed32   ord_type = 11;
+    optional double     price = 12;
+    optional double     last_shares = 13;
+    optional double     last_price = 14;
+    optional double     leaves_qty = 15;
+    optional double     cum_qty = 16;
+    optional double     avg_price = 17;
+    optional sfixed32   time_in_force = 18;
+    optional string     transact_time = 19;
+    optional string     exec_inst = 20;
+    optional sfixed32   handl_inst = 21;
+    optional sfixed32   order_reject_reason = 22;
+    optional double     min_qty = 23;
+    optional sfixed32   venue_id = 24;
+    optional string     account = 25;
+}
+"""
+
+def handle_execution_report(er):
+  order_id = er.cl_order_id
+  if er.order_status == ORDER_STATUS.NEW:
+    assert order_id in order_manager
+    order = order_manager[order_id]
+    # some ECN's don't tell us about pending changes
+    assert order.state in [LOCAL_ORDER_STATUS.SENT, ORDER_STATUS.PENDING_NEW] \
+      "Order %d's state got updated to NEW but was previously %s"
+    assert order.
+    order.state = ORDER_STATUS.NEW
+    
+      if (isNewItem) {
+          pan::log_DEBUG("Added to working: ",
+                      pan::blob(oid.get_uuid(), oid.size()));
+      }
+      size_t numPendingOrders = pendingOrders.erase(oid);
+      pan::log_DEBUG("Remaining pending orders: ", pan::integer(numPendingOrders));
+
+      clock_gettime(CLOCK_REALTIME, &ts); 
+      pan::log_DEBUG("NEW ",
+                      "OID: ", 
+                      pan::blob(oid.get_uuid(), oid.size()), 
+                      " ", 
+                      pan::integer(ts.tv_sec), 
+                      ":", 
+                      pan::integer(ts.tv_nsec));
+  }
 """void 
 handleExecutionReport(capkproto::execution_report& er) 
 {
