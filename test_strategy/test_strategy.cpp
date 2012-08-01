@@ -351,6 +351,19 @@ init()
 	OrderMux* ptr_order_mux = new OrderMux(&ctx, 
 				 ORDER_MUX);
 
+
+    zmq::socket_t* direct_interface_socket = new zmq::socket_t(ctx, ZMQ_REQ);
+	// send helo msg to each exchange we're connecting to
+    // KTK TODO - SHOULD WAIT FOR ACK!!!!
+    direct_interface_socket->connect(capk::kFXCM_ORDER_INTERFACE_ADDR);
+	int heloOK = snd_HELO(direct_interface_socket, 
+            capk::kFXCM_ORDER_INTERFACE_ADDR,
+            sid, 
+            capk::kFXCM_VENUE_ID); 
+  
+    pan::log_DEBUG("snd_HELO returned: ", pan::integer(heloOK));
+    char ch;
+    std::cin >> ch;
     capk::ClientOrderInterface* ptr_fxcm_order_interface 
         = new capk::ClientOrderInterface(capk::kFXCM_VENUE_ID, 
 								&ctx, 
@@ -381,9 +394,6 @@ init()
         std::cerr << "EXCEPTION MUTHAFUCKA(1)! " <<  err.what() << "(" << err.num() << ")" << std::endl;
     }
 
-	// send helo msg to each exchange we're connecting to
-    // KTK TODO - SHOULD WAIT FOR ACK!!!!
-	snd_HELO(pOEInterface, sid, capk::kFXCM_VENUE_ID); 
 	//snd_HELO(pOEInterface, sid, kXCDE_VENUE_ID); 
   
  
