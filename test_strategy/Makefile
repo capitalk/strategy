@@ -45,7 +45,7 @@ PANTHEIOS_LIBS= -L $(PANTHEIOS_ROOT)/lib \
         -l pantheios.1.util.gcc44.file64bit \
         -l pantheios.1.core.gcc44.file64bit 
 
-CFLAGS=-Wall -std=c++0x -pthread -O3 -DLOG #-ULOG
+CFLAGS=-Wall -std=c++0x -pthread -O3 -ULOG -DNDEBUG
 LDFLAGS=-static
 
 ifeq ($(dbg),1)

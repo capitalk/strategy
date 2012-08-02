@@ -141,7 +141,9 @@ query_cancel()
 		oc.set_order_qty(d_quantity);
 	}
 	
+#ifdef LOG
 	pan::log_DEBUG("CANCEL: Created message [", pan::integer(oc.ByteSize()), "]\n",  oc.DebugString(), "\n");
+#endif
 
 	return oc;
 }
@@ -198,7 +200,9 @@ query_cancel_replace()
 		ocr.set_order_qty(d_quantity);
 	}
 	
+#ifdef LOG
 	pan::log_DEBUG("CANCEL REPLACE: Created message [", pan::integer(ocr.ByteSize()), "]\n",  ocr.DebugString(), "\n");
+#endif
 
 	return ocr;
 }
@@ -284,7 +288,9 @@ query_order()
 	nos.set_account(str_account);
 */
 
+#ifdef LOG
 	pan::log_DEBUG("Created message [", pan::integer(nos.ByteSize()), "]\n",  nos.DebugString(), "\n");
+#endif
 
 	return nos;
 }
@@ -297,7 +303,9 @@ receiveBBOMarketData(zmq::socket_t* sock)
     zmq::message_t tickmsg;
     assert(sock);
     bool rc;
+#ifdef LOG
     pan::log_DEBUG("receiveBBOMarketData()");
+#endif
     rc = sock->recv(&tickmsg, ZMQ_NOBLOCK);
     assert(rc);
     instrument_bbo_protobuf.ParseFromArray(tickmsg.data(), tickmsg.size());
@@ -307,9 +315,11 @@ receiveBBOMarketData(zmq::socket_t* sock)
     // OK - 20120717
     if (instrument_bbo_protobuf.symbol() == "EUR/USD") {
 
+#ifdef LOG
         pan::log_DEBUG("Received market data:\n", 
                 instrument_bbo_protobuf.symbol(), 
                 instrument_bbo_protobuf.DebugString());
+#endif
 
         bbo_book.bid_venue_id = instrument_bbo_protobuf.bid_venue_id();
         bbo_book.bid_price = instrument_bbo_protobuf.bid_price();
@@ -373,7 +383,9 @@ init()
 	pOEInterface = new zmq::socket_t(ctx, ZMQ_PAIR);
 	pOEInterface->setsockopt(ZMQ_LINGER, &zero, sizeof(zero));
 	assert(pOEInterface);
+#ifdef LOG
     pan::log_DEBUG("Connecting order interface socket to: ", ORDER_MUX);
+#endif
     try {
     	pOEInterface->connect(ORDER_MUX);
     }
@@ -412,7 +424,9 @@ init()
     pMDInterface = new zmq::socket_t(ctx, ZMQ_PAIR);
     pMDInterface->setsockopt(ZMQ_LINGER, &zero, sizeof(zero));
     assert(pMDInterface);
+#ifdef LOG
     pan::log_DEBUG("Connecting market data socket to: ", MD_MUX);
+#endif
     try {
         pMDInterface->connect(MD_MUX);
     }
@@ -431,7 +445,9 @@ main(int argc, char **argv)
 	GOOGLE_PROTOBUF_VERIFY_VERSION;
 
 	assert(sid.parse(STRATEGY_ID) == 0);
+#ifdef LOG
     pan::log_DEBUG("MY STRATEGY_ID IS: ", pan::blob(sid.get_uuid(), sid.size()));
+#endif
     std::string logFileName = createTimestampedLogFilename("test_strategy");
 	logging_init(logFileName.c_str());
 
@@ -451,7 +467,6 @@ main(int argc, char **argv)
     }
 
     int initOK = init();
-    pan::log_DEBUG("init() complete");
     assert(initOK == 0);
     bool rc;
     int ret;
@@ -511,7 +526,9 @@ main(int argc, char **argv)
                 char action;
                 //fgets(action, sizeof(buf), stdin);
                 action = fgetc(stdin);
+#ifdef LOG
                 pan::log_DEBUG("ACTION RECEIVED: ", pan::character(action));
+#endif
                 switch (action) {
                 case '\n': break;
                 case '\r': break;

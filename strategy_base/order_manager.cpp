@@ -62,7 +62,9 @@ create_order(capkproto::new_order_single* nos,
 				double price) 
 {
     assert(nos);
+#ifdef LOG
 	pan::log_DEBUG("create_order()");
+#endif
 	//capkproto::new_order_single nos;
 	nos->set_strategy_id(sid.get_uuid(), sid.size());
 	nos->set_symbol(symbol);
@@ -95,11 +97,15 @@ handleExecutionReport(capkproto::execution_report& er)
 
     order_id_t oid = order.getOid();
     oid.c_str(oidbuf);
+#ifdef LOG
     pan::log_DEBUG("APP Execution report received CLOID: ", oidbuf);
+#endif
 
     order_id_t origOid = order.getOrigClOid();
     origOid.c_str(oidbuf);
+#ifdef LOG
     pan::log_DEBUG("APP Execution report received ORIGCLOID: ", oidbuf);
+#endif
 
     capk::OrdStatus_t ordStatus = order.getOrdStatus();
 /*
@@ -362,12 +368,16 @@ handleExecutionReport(capkproto::execution_report& er)
 void
 handleOrderCancelReject(capkproto::order_cancel_reject& ocr) 
 {
+#ifdef LOG
     pan::log_DEBUG("handleOrderCancelReject()"); 
+#endif
     order_id_t oid;
     oid.set(ocr.orig_cl_order_id().c_str(), ocr.orig_cl_order_id().size());
+#ifdef LOG
     pan::log_WARNING("OID: ", pan::blob(oid.get_uuid(), oid.size()), 
             " cancel rejected - full msg follows\n", 
             ocr.DebugString());
+#endif
 /*
     order_map_iter_t pendingIter = pendingOrders.find(oid);
     if (orderIter == pendingOrders.end()) {
@@ -389,9 +399,11 @@ handleOrderCancelReject(capkproto::order_cancel_reject& ocr)
         workingOrders.erase(orderIter);
     }
 */
+#ifdef LOG
     pan::log_DEBUG("Num pending orders: ", pan::integer(pendingOrders.size()));
     pan::log_DEBUG("Num working orders: ", pan::integer(workingOrders.size()));
     pan::log_DEBUG("Num completed orders: ", pan::integer(completedOrders.size()));
+#endif
 }
 
 bool
