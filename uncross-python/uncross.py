@@ -3,13 +3,15 @@ import gevent
 import zmq 
 import time 
 import collections
-from fix_constants import ORDER_STATUS
+from fix_constants import ORDER_STATUS, EXEC_TYPE
 import order_engine_constants
+from enum import enum 
 
-context = zmq.Context()
+
+LOCAL_ORDER_STATUS = enum(WAITING = -1, SENT = -2)
+
 
 Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'timestamp'))
-
 # a pair of entries for bid and offer
 Cross = collections.namedtuple('Cross', ('bid', 'offer'))
 
@@ -20,6 +22,7 @@ symbols_to_offers = {}
 # 'find_best_crossed_pair' ran 
 updated_symbols = set([])
 
+context = zmq.Context()
 
 """
 message execution_report {
@@ -51,120 +54,35 @@ message execution_report {
 }
 """
 
+
+
 def handle_execution_report(er):
   order_id = er.cl_order_id
-  if er.order_status == ORDER_STATUS.NEW:
+  # only used for cancel and cancel/replace
+  original_order_id = er.orig_cl_order_id 
+  
+  status = er.order_status
+  exec_type = er.exec_type
+
+  if status == ORDER_STATUS.NEW:
     assert order_id in order_manager
     order = order_manager[order_id]
+    
     # some ECN's don't tell us about pending changes
-    assert order.state in [LOCAL_ORDER_STATUS.SENT, ORDER_STATUS.PENDING_NEW] \
-      "Order %d's state got updated to NEW but was previously %s"
-    assert order.
+    assert order.state in [None, ORDER_STATUS.PENDING_NEW] \
+      "Order %d's state got updated to NEW but was previously %s" % (order_id, order.state)
+    assert order.size == er.order_qty
+    assert order.price == er.price 
     order.state = ORDER_STATUS.NEW
+  elif  status == ORDER_STATUS.PARTIAL_FILL:
+    assert exec_type != EXEC_TYPE.REPLACE,\
+      "BOTH replaced and partial fill: order = %s, original_order = %s" % (order_id, original_order_id)
+  elif status = ORDER_STATUS.FILL:
+    assert exec_type != EXEC_TYPE.REPLACE, \
+      "BOTH filled and replaced: order = %s, original_order = %s" % (order_id, original_order_id)
     
-      if (isNewItem) {
-          pan::log_DEBUG("Added to working: ",
-                      pan::blob(oid.get_uuid(), oid.size()));
-      }
-      size_t numPendingOrders = pendingOrders.erase(oid);
-      pan::log_DEBUG("Remaining pending orders: ", pan::integer(numPendingOrders));
-
-      clock_gettime(CLOCK_REALTIME, &ts); 
-      pan::log_DEBUG("NEW ",
-                      "OID: ", 
-                      pan::blob(oid.get_uuid(), oid.size()), 
-                      " ", 
-                      pan::integer(ts.tv_sec), 
-                      ":", 
-                      pan::integer(ts.tv_nsec));
-  }
-"""void 
-handleExecutionReport(capkproto::execution_report& er) 
-{
-  
-    timespec ts;
-    bool isNewItem;
-    capk::Order order;
-    order.set(const_cast<capkproto::execution_report&>(er));
-    //char oidbuf[UUID_STRLEN];
-    uuidbuf_t oidbuf;
-
-    order_id_t oid = order.getOid();
-    oid.c_str(oidbuf);
-    pan::log_DEBUG("APP Execution report received CLOID: ", oidbuf);
-
-    order_id_t origOid = order.getOrigClOid();
-    origOid.c_str(oidbuf);
-    pan::log_DEBUG("APP Execution report received ORIGCLOID: ", oidbuf);
-
-    capk::OrdStatus_t ordStatus = order.getOrdStatus();
-
-    //pan::log_DEBUG(er.DebugString());
-
-    // There are three FIX tags that relay the status of an order
-    // 1) ExecTransType (20)
-    // 2) OrdStatus (39)
-    // 3) ExecType (150)
-    // Usually OrdStatus == ExecType but the devil lives where they are not
-    // equal. For some order statuses they are always the same (e.g. NEW) 
-    // so we don't check ExecType but others (e.g. PENDING_CANCEL) they may 
-    // be different since the order may exists in more than one state (e.g
-    // a fill while a cancel is pending). 
-    // see fix-42-with_errata_2001050.pdf on http://fixprotocol.org for more info
-
-    
-    if (ordStatus == capk::ORD_STATUS_NEW) {
-        assert(workingOrders.find(oid) == workingOrders.end());
-        // Can't assert this since not all exchanges send PENDING_NEW before
-        // sending ORDER_NEW
-        //assert(pendingOrders.find(oid) != pendingOrders.end());
-
-        order_map_insert_t insert = 
-                workingOrders.insert(order_map_value_t(oid, order));
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to working: ",
-                        pan::blob(oid.get_uuid(), oid.size()));
-        }
-        size_t numPendingOrders = pendingOrders.erase(oid);
-        pan::log_DEBUG("Remaining pending orders: ", pan::integer(numPendingOrders));
-
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("NEW ",
-                        "OID: ", 
-                        pan::blob(oid.get_uuid(), oid.size()), 
-                        " ", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-    }
-
-    if (ordStatus == capk::ORD_STATUS_PARTIAL_FILL) {
-
-        if (order.getExecType() == capk::EXEC_TYPE_REPLACE) {
-            pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " replaced AND partially filled ");
-        }
-        order_map_iter_t orderIter = workingOrders.find(origOid);
-        // The below assertion will fail (right now) if the strategy receives 
-        // an update for an order which is not in its cache. This happens when 
-        // strategy crashes and is restarted WITHOUT reading working orders from 
-        // persistent storage. 
-        if (orderIter == workingOrders.end()) {
-            pan::log_CRITICAL("Received PARTIAL FILL for order NOT FOUND in working order cache");
-        }
-        (*orderIter).second = order;
-        completedOrders.insert(order_map_value_t(origOid, order));
-    }
-
-    if (ordStatus == capk::ORD_STATUS_FILL) {
-       if (order.getExecType() == capk::EXEC_TYPE_REPLACE) {
-           pan::log_NOTICE("OID: ", pan::blob(oid.get_uuid(), oid.size()),
-                   " replaced AND fully filled");
-       }
-
-        order_map_insert_t insert = 
-            completedOrders.insert(order_map_value_t(oid, order)); 
+    order_map_insert_t insert = 
+      completedOrders.insert(order_map_value_t(oid, order)); 
         isNewItem = insert.second;
         if (isNewItem) {
             pan::log_DEBUG("Added to completed: ", 
@@ -290,11 +208,12 @@ class OrderInfo:
     
     
 def update_market_data(bbo, market_data):
+  timestamp = time.time()
   print "Symbol", bbo.symbol
   print "Venue", bbo.bb_venue_id
   symbol, venue_id = bbo.symbol, bbo.bb_venue_id  
-  new_bid = Entry(bbo.bb_price, bbo.bb_size, venue_id)  
-  new_offer = Entry(bbo.ba_price, bbo.ba_size, venue_id)
+  new_bid = Entry(bbo.bb_price, bbo.bb_size, venue_id, timestamp)  
+  new_offer = Entry(bbo.ba_price, bbo.ba_size, venue_id, timestamp)
   
   print "Bid", new_bid
   print "Offer", new_offer

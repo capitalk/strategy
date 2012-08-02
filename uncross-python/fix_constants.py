@@ -31,7 +31,7 @@ ORDER_STATUS = enum(
   EXPIRED  = 'C',
   RESTATED  = 'D',
   PENDING_REPLACE  = 'E',
-})
+)
 
 """Execution Report Type, fix tag 150. 
   Often, but not always, the same as order status. 
@@ -51,31 +51,31 @@ EXEC_TYPE = enum(
   PENDING_NEW  = 'A',
   CALCULATED  = 'B',
   EXPIRED  = 'C',
-  ACCEPTED_FOR_BIDDING  = 'D',
+  RESTATED  = 'D',
   PENDING_REPLACE  = 'E',
 )
 
 """Order Types - FIX tag 40"""
 ORDER_TYPE = enum(
-  MARKET = '1'
-  LIMIT = '2'
-  STOP = '3'
-  STOP_LIMIT = '4'
-  MARKET_ON_CLOSE = '5'
-  WITH_OR_WITHOUT = '6'
-  LIMIT_OR_BETTER = '7'
-  LIMIT_WITH_OR_WITHOUT = '8'
-  ON_BASIS = '9'
-  ON_CLOSE = 'A'
-  LIMIT_ON_CLOSE = 'B'
-  FOREX_MARKET = 'C'
-  PREVIOUSLY_QUOTED = 'D'
-  PREVIOUSLY_INDICATED = 'E'
-  FOREX_LIMIT = 'F'
-  FOREX_SWAP = 'G'
-  FOREX_PREVIOUSLY_QUOTED = 'H'
-  FUNARI = 'I' # limit day order with executed portion handled as Market On Close e.g. Japan...
-  PEGGED = 'P'
+  MARKET = '1',
+  LIMIT = '2',
+  STOP = '3',
+  STOP_LIMIT = '4',
+  MARKET_ON_CLOSE = '5',
+  WITH_OR_WITHOUT = '6',
+  LIMIT_OR_BETTER = '7',
+  LIMIT_WITH_OR_WITHOUT = '8',
+  ON_BASIS = '9',
+  ON_CLOSE = 'A',
+  LIMIT_ON_CLOSE = 'B',
+  FOREX_MARKET = 'C',
+  PREVIOUSLY_QUOTED = 'D',
+  PREVIOUSLY_INDICATED = 'E',
+  FOREX_LIMIT = 'F',
+  FOREX_SWAP = 'G',
+  FOREX_PREVIOUSLY_QUOTED = 'H',
+  FUNARI = 'I', # limit day order with executed portion handled as Market On Close e.g. Japan...
+  PEGGED = 'P',
 )
 
 
@@ -100,7 +100,7 @@ EXEC_INSTRUCTION = enum(
   ALL_OR_NONE  = 'G',
   INSTITUTIONS_ONLY  = 'I',
   LAST_PEG  = 'L',
-  MIDPRICE_PEG  = 'M' #  midprice of inside quote
+  MIDPRICE_PEG  = 'M', #  midprice of inside quote
   NON_NEGOTIABLE  = 'N',
   OPENING_PEG  = 'O',
   MARKET_PEG  = 'P',
