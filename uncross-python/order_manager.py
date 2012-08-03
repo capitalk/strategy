@@ -1,27 +1,42 @@
 import uuid
-import copy
 import time 
-from enum import enum 
 from fix_constants import ORDER_TYPE, TIME_IN_FORCE
-
-class Status:
-  SENT = "sent"
-  ALIVE = "alive"
-  CANCELED = "canceled"
-  REJECTED = "rejected"
-  FILLED = "filled"
+from fix_constants import EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
+from collections import namedtuple
 
 class Side:
   BID = 0
   OFFER = 1
 
-PendingChange = namedtuple('PendingChange', ('id', 'qty', 'price'))
+"""
+There are lots of complicated state transitions in the lifetime of an order 
+but we can simplify our model considerably if we focus on three states:
+ - Sent but not yet active: 
+     order.id in order_manager.live_orders and order.status is None
+ - Active in the market: 
+     order.id in order_manager.live_orders and order.status is not None
+ - Dead: order.status in not None and
+    order.id in order_manager.dead_orders  
+Additionally, instead of treating each distinct order id as a distinct order
+we instead treat the chain of order ids as versions of the same order-- 
+so keep just one order object around but update its ID and properties. 
+"""
+
+#PendingChange = namedtuple('PendingChange', ('id', 'field', 'old', 'new'))
 
 class Order:
   def __init__(self, venue_id, symbol, side, price, qty,
       order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY, 
-      current_id = None):
-    
+      id = None):
+      
+    self.last_update_time = time.time()
+
+    if id is None: 
+      self.id = str(uuid.uuid4())
+    else:
+      self.id = id 
+      
+  
     self.venue_id = venue_id 
     self.symbol = symbol 
     self.side = side 
@@ -35,259 +50,164 @@ class Order:
     # will change to full qty if order is accepted
     self.unfilled_qty = 0
     
-    self.status = Status.SENT
-    
-    # when we send a message to the exchange which hasn't yet actually
-    # lead to a state change, take not of it in pending_changes 
-    # For example: (replace_order_id, )
-    self.pending_changes = {}
-    self.pending_status = Status.ALIVE
-    
     # fill this in when we get ack back from exchange
-    self.exchange_status = None
-    
-    self.last_update_time = time.time()
-    if id is None: 
-      self.id = str(uuid.uuid4())
-    
-    
+    self.status = None
+
+Fill = namedtuple('Fill', ('symbol', 'venue', 'price', 'qty'))
+
 class OrderManager:
   def __init__(self):
     self.orders = {}
-    self.live_orders = set([])
+    self.live_order_ids = set([])
+   
+    # map from exec_ids to fills 
+    #self.fills = {}    
   
-  def new_order(self, order):
-    assert order.id not in self.orders
-    assert order.id not in self.live_orders
-    self.orders[order.id] = order
-
+    
   def get_order(self, order_id):
-    assert order_id in self.orders, \
-      "Couldn't find order id %s" % order_id
-    return self.orders[order_id]
+    if order_id in self.orders:
+      return self.orders[order_id]
+    else:
+      raise RuntimeError("Couldn't find order id %s" % order_id)
+    
+  def _add_order(self, order):
+    order_id = order.id 
+    assert order_id not in self.orders
+    assert order_id not in self.live_order_ids
+    self.orders[order_id] = order
+    # just assume that if we're ever adding a new order that means
+    # it's about to be sent to an ECN-- it doesn't really make sense
+    # to add dead orders 
+    self.live_order_ids.add(order_id)
     
     
-  def cancel(self, order_id, cancel_id):
+  def _remove_order(self, order_id):
+    """Remove order from orders & live_order_ids and return """
+    assert order_id in self.orders, "Can't find order %s" % order_id
+    order = self.orders[order_id]
+    del self.orders[order_id]
+    if order_id in self.live_order_ids:
+      self.live_order_ids.remove(order_id)
+    return order 
+    
+  
+  def _rename(self, old_id, new_id):
+    assert old_id in self.orders, "Can't rename non-existent order %s" % old_id
+    assert old_id in self.live_order_ids, "Can't rename dead order %s" % old_id
+    assert new_id not in self.orders, \
+      "Can't rename %s to %s since new order id already exists" % (old_id, new_id)
+    was_live = old_id in self.live_order_ids
+    order = self._remove_order(old_id)
+    order.id = new_id
+    self.orders[new_id] = order
+    if was_live:
+      self.live_order_ids.add(new_id)
+    return order 
+      
+      
+  def _cancel(self, order_id, cancel_id):
     """We need the ID of the cancel request itself since we may get future messages 
        about the underlying order but only under the ID of the cancel request"""
-    assert order_id in self.live_orders, \
-       "Can't cancel %s if it's not in working orders" % order_id
-    order = self.get_order(order_id)
-    order.status = LocalStatus.CANCELED
-    order.exchange_status = ORDER_STATUS.CANCELED
-    # if we're canceled nothing else can happen
-    order.pending_status = None
-    order.pending_changes.clear()
-    if order_id in self.sent_orders:
-      # canceling a pending new order
-      assert order_id not in self.live_orders
-      self.sent_orders.remove(order_id)
-    elif order_id in self.live_orders:
-      assert order_id not in self.sent_orders:
-      self.live_orders.remove(order_id)
-    else:
-      raise RuntimeError('Attempting to cancel order %s which is neither working nor pending' % order_id)
-    order.last_update_time = time.time()
+       
+    assert order_id in self.live_order_ids, \
+       "Can't cancel %s if it's not in live orders" % order_id
     
-  def cancel_replace(self, old_order_id, new_order_id, price, qty, unfilled_qty, exchange_status):
-    
-    assert old_order_id in self.orders, \
-      "Couldn't find %s when trying to rename to %s" % (old_order_id, new_order_id)
-    assert new_order_id not in self.orders, \
-      "Didn't expect %s to already exist when renaming from %s" % (new_order_id, old_order_id)
-    
-    old_order = self.get(old_order_id)
-    # remove this cancel/replace from the pending dict 
-    assert new_order_id in old_order.pending_changes, \
-      "Received a change from %s -> %s which we never requested!" % (old_order_id, new_order_id)
-    del old_order.pending_changes[new_order_id]
-    new_order = copy.deepcopy(old_order)
-    
-    # will remove old_order-id from live_orders
-    self.cancel_order(old_order_id)    
+    self.live_order_ids.remove(order_id)
 
-    # bring it back to life 
-    new_order.id = new_order_id
-    new_order.status = Status.ALIVE
-    new_order.pending_status = None
-    new_order.price = price 
-    new_order.qty = qty
-    new_order.unfilled_qty = unfilled_qty 
-    new_order.exchange_status = exchange_status
-    self.live_orders.add(new_order_id)
-    self.orders[new_order_id] = new_order
-    new_order.last_update_time = time.time()
-  
-  def partial_fill(self, order_id, filled_qty, unfilled_qty):
-    assert order_id in self.live_orders
-    assert order_id in self.orders
+    # have to rename the live order first and then kill it once its ID is the 
+    # same as that of the cancel request 
+    order = self._rename(order_id, cancel_id)
+    order.status = ORDER_STATUS.CANCELLED
+    self.last_update_time = time.time()  
     
-    order = self.orders[order_id]
-    assert order.qty == (filled_qty + unfilled_qtty), \
-      "Quantities for %s didn't match up: filled(%d) + unfilled(%d) != %d" % \
-      (filled_qty, unfilled_qty, order.qty)
-      
-    order.filled_qty = filled_qty
-    order.unfilled_qty = unfilled_qty 
-    order.last_update_time = time.time()
+  def _update_order(self, id, price, qty, filled_qty, unfilled_qty, status):
+    order = self.get_order(id)
+    changed = False
+    if order.price != price:
+      order.price = price 
+      changed = True
+    if order.qty != qty:
+      order.qty = qty
+      changed = True
+    if order.filled_qty != filled_qty:
+      order.filled_qty = filled_qty
+      changed = True
+    if order.unfilled_qty != unfilled_qty:
+      order.unfilled_qty = unfilled_qty 
+      changed = True
+
+    if changed: 
+      order.last_update_time = time.time() 
   
   
-  def handle_execution_report(er):
+  def handle_execution_report(self, er):
     order_id = er.cl_order_id
     # only used for cancel and cancel/replace
     original_order_id = er.orig_cl_order_id 
 
     status = er.order_status
     exec_type = er.exec_type
+    transaction_type = er.exec_trans_type
+    price = er.price
+    qty = er.order_qty
+    filled_qty = er.cum_qty 
+    unfilled_qty = er.leaves_qty
     
-    if exec_type == ORDER_STATUS.REPLACE:
-      self.cancel_replace(old_order_id, new_order_id, 
-        price = er.price, qty = er.order_qty, unfilled_qty = er.leaves_qty, 
-        exchange_status = status)
-    elif exec_type in [\
-      EXEC_TYPE.STOPPED, 
-      EXEC_TYPE.SUSPENDED, 
-      EXEC_TYPE.RESTATED, 
-      EXEC_TYPE.EXPIRED, 
-      EXEC_TYPE.CALCULATED]:
+    # NEW transactions are updates to our state and STATUS transactions just
+    # repeat the values of the most recent transaction. The trickier cases
+    # are CANCEL and CORRECT, which refer to the exec_id of the previous 
+    # transaction they undo or modify via exec_ref_id
+    # For now we crash if the ECN tries to cancel or correct a previous
+    # transaction 
+    assert transaction_type in [EXEC_TRANS_TYPE.NEW, EXEC_TRANS_TYPE.STATUS], \
+      "Exec transaction type not yet implemented: %s " % \
+      EXEC_TRANS_TYPE.to_str(transaction_type)
+    
+    
+    # It's possible to get unsolicited cancels and replaces, in which case
+    # there is only order_id and an undefined value in original_order_id
+    # COMMENTED OUT SINCE WE DON'T YET HAVE self.pending_changes 
+    
+    ##if exec_type in [EXEC_TYPE.CANCEL, EXEC_TYPE.REPLACE]:
+    ##  assert order_id in self.pending_changes, \
+    ##    "Got unsolicited %s (order_id = %s, original_order_id=%s)" % \
+    ##    (EXEC_TYPE.to_str(exec_type), order_id, original_order_id)
+    
+    
+    ###################################################
+    #    Catch exec_types which we don't support      #
+    ##################################################
+    if exec_type in [EXEC_TYPE.STOPPED, EXEC_TYPE.SUSPENDED, EXEC_TYPE.RESTATED,  EXEC_TYPE.CALCULATED]:
       err_msg = \
-      "Unsupported exec_type = %s, order status = %s, order_id = %s, original_order_id = %s" %
-        (EXEC_TYPE.to_str(exec_type), EXEC_TYPE.to_str(status), order_id, original_order_id)
+        "Unsupported exec_type = %s, order status = %s, order_id = %s, original_order_id = %s" % \
+         (EXEC_TYPE.to_str(exec_type), EXEC_TYPE.to_str(status), order_id, original_order_id)
       raise RuntimeError(err_msg)
-    elif exec_type in [
-      EXEC_TYPE.PENDING_NEW, EXEC_TYPE.PENDING_CANCEL, EXEC_TYPE.PENDING_REPLACE]:
-      print "Nothing to do for exec_type = %s" % EXEC_TYPE.to_str(exec_type)
     
+    ###########################################################
+    #      Rename replaced/canceled orders, kill rejected    #
+    ##########################################################
+    if transaction_type == EXEC_TRANS_TYPE.NEW and exec_type in [EXEC_TYPE.REPLACE, EXEC_TYPE.CANCELLED]:
+      # for now we're not dealing with unsolicited cancels
+      assert original_order_id in self.live_order_ids   
+      self._rename(original_order_id, order_id)
+     
+    ##################################
+    #      Update Order fields       #
+    ##################################
     
-    #DONE_FOR_DAY = '3',
-    #CANCELLED  = '4',
-    #REPLACE  = '5',
-    #REJECTED  = '8',
-    #CALCULATED  = 'B',
-    
-    if status == ORDER_STATUS.NEW:
-      assert order_id in order_manager
-      order = order_manager[order_id]
-
-        # some ECN's don't tell us about pending changes
-        assert order.state in [None, ORDER_STATUS.PENDING_NEW] \
-          "Order %d's state got updated to NEW but was previously %s" % (order_id, order.state)
-        assert order.size == er.order_qty
-        assert order.price == er.price 
-        order.state = ORDER_STATUS.NEW
-      elif  status == ORDER_STATUS.PARTIAL_FILL:
-        assert exec_type != EXEC_TYPE.REPLACE,\
-          "BOTH replaced and partial fill: order = %s, original_order = %s" % (order_id, original_order_id)
-      elif status = ORDER_STATUS.FILL:
-        assert exec_type != EXEC_TYPE.REPLACE, \
-          "BOTH filled and replaced: order = %s, original_order = %s" % (order_id, original_order_id)
-
-        order_map_insert_t insert = 
-          completedOrders.insert(order_map_value_t(oid, order)); 
-            isNewItem = insert.second;
-            if (isNewItem) {
-                pan::log_DEBUG("Added to completed: ", 
-                        pan::blob(oid.get_uuid(), oid.size()));
-            }
-
-            // delete from working orders
-            order_map_iter_t orderIter = workingOrders.find(oid);
-            if (orderIter == workingOrders.end()) {
-                pan::log_CRITICAL("OID: ", 
-                pan::blob(oid.get_uuid(), oid.size()), 
-                " not found in working orders");
-            }
-            else {
-                pan::log_DEBUG("Deleting filled order from working orders");
-                workingOrders.erase(orderIter);
-            }
-        }
-
-        if (ordStatus == capk::ORD_STATUS_CANCELLED) {
-
-            clock_gettime(CLOCK_REALTIME, &ts); 
-            pan::log_DEBUG("ORIGOID: ", 
-                            pan::blob(origOid.get_uuid(), origOid.size()), 
-                            " CLOID: (",pan::blob(oid.get_uuid(), oid.size()),")", 
-                            " CANCELLED ", 
-                            pan::integer(ts.tv_sec), 
-                            ":", 
-                            pan::integer(ts.tv_nsec));
-
-            order_map_iter_t orderIter = workingOrders.find(origOid);  
-            if (orderIter != workingOrders.end()) {
-                pan::log_DEBUG("Deleting order from working orders");
-                workingOrders.erase(orderIter);
-            }
-            else {
-                pan::log_WARNING("ORIGOID: ", 
-                    pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " cancelled but not found in working orders");
-                order_map_iter_t pendingIter = pendingOrders.find(origOid);
-                if (pendingIter != pendingOrders.end()) {
-                    pendingOrders.erase(pendingIter);
-                }
-                else {
-                    pan::log_WARNING("OID: ", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " cancelled but not found in working OR pending orders");
-                }
-            }
-        }
-
-        // origClOid is the original order that was replaced
-        // so now the new order has working order id of clOrdId 
-        // with the parameters that were sent in the replace msg
-        if (ordStatus == capk::ORD_STATUS_REPLACE) {
-
-            // insert the new order id which is in clOrdId NOT origClOid
-            order_map_insert_t insert = 
-               workingOrders.insert(order_map_value_t(oid, order)); 
-
-            order_map_iter_t orderIter = workingOrders.find(origOid);
-            // orig order must be found in working orders
-            assert(orderIter != workingOrders.end());
-
-            // delete the old order id
-            workingOrders.erase(orderIter);
-        }
-
-        if (ordStatus == capk::ORD_STATUS_PENDING_CANCEL) {
-            // We had a partial fill while pending cancel - handle it
-            if (order.getExecType() == capk::EXEC_TYPE_PARTIAL_FILL) {
-                pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " partial fill while pending cancel");
-                completedOrders.insert(order_map_value_t(origOid, order));
-            }
-            order_map_insert_t insert = 
-                    pendingOrders.insert(order_map_value_t(origOid, order));
-            isNewItem = insert.second;
-            if (isNewItem) {
-                pan::log_DEBUG("Added to pending: ",
-                            pan::blob(origOid.get_uuid(), origOid.size()));
-            }
-        }
-        if (ordStatus == capk::ORD_STATUS_PENDING_REPLACE) {
-            if (order.getExecType() == capk::EXEC_TYPE_PARTIAL_FILL) {
-                pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " partial fill while pending replace");
-                completedOrders.insert(order_map_value_t(origOid, order));
-            }
-            order_map_insert_t insert = 
-                    pendingOrders.insert(order_map_value_t(origOid, order));
-            isNewItem = insert.second;
-            if (isNewItem) {
-                pan::log_DEBUG("Added to pending: ",
-                            pan::blob(origOid.get_uuid(), origOid.size()));
-            }
-
-
-        if (ordStatus == capk::ORD_STATUS_REJECTED) {
-          pan::log_DEBUG("Deleting rejected order from pending");
-          pendingOrders.erase(orderIter);
+    # The logic for which ID to use is messy due to weird interactions
+    # between STATUS transactions, cancels/replaces, unsolicited cancels/replaces, 
+    # etc...
+    # So, we rename the orders above and then assume we can ignore original_order_id.
+    # Eventually we should use the _update_order method to also track position. 
+    assert original_order_id not in self.orders
+    assert order_id in self.orders
+    self._update_order(order_id, price, qty, filled_qty, unfilled_qty, status)
   
-  def handle_cancel_reject():
-    
-  
-
-    
+    ################################################
+    #     Is the order in a terminal state?        #
+    ################################################
+    if status in [ORDER_STATUS.FILL, ORDER_STATUS.EXPIRE, ORDER_STATUS.CANCELLED ]:
+      if order_id in self.live_order_ids:
+        self.live_order_ids.remove(order_id)
+      
