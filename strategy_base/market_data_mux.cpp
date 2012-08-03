@@ -116,7 +116,7 @@ MarketDataMux::run()
 
 					size_t sockIdx;
 					for (sockIdx = 0; sockIdx < _mdArraySize; sockIdx++) {
-						if (_mdArray[sockIdx]->getInterfaceID() == venue_id) {
+						if (_mdArray[sockIdx]->getVenueID() == venue_id) {
 							venue_sock = _mdArray[sockIdx]->getInterfaceSocket();
 							assert(venue_sock);
 							//pan::log_DEBUG("MDMUX found interface socket for id: ", pan::integer(venue_id));

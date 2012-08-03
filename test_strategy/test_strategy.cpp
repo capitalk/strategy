@@ -47,17 +47,6 @@ strategy_id_t sid;
 const char* const ORDER_MUX = "inproc://order_mux";
 const char* const MD_MUX = "inproc://md_mux";
 
-/*
-const venue_id_t capk::kFXCM_ID = 890778;
-const venue_id_t kXCDE_ID = 908239;
-const int capk::kCAPK_AGGREGATED_BOOK = 982132;
-
-const char* capk::kFXCM_ORDER_INTERFACE_ADDR = "tcp://127.0.0.1:9999";
-const char* kXCDE_ORDER_INTERFACE_ADDR = "tcp://127.0.0.1:9998";
-
-const char* capk::kCAPK_AGGREGATED_BOOK_MD_INTERFACE_ADDR = "tcp://127.0.0.1:9000";
-*/
-
 #define MAX_MSGSIZE 256
 
 // Global zmq context
@@ -78,7 +67,12 @@ extern order_map_t pendingOrders;
 extern order_map_t workingOrders;
 extern order_map_t completedOrders;	
 
-//void list_orders();
+// Order multiplexer and its thread
+OrderMux* ptr_order_mux;
+boost::thread* omux_thread = NULL;
+// Market data multiplexer and its thread
+MarketDataMux* ptr_market_data_mux;
+boost::thread* mdmux_thread = NULL;
 
 // Signal handler setup for ZMQ
 static int s_interrupted = 0;
@@ -102,7 +96,9 @@ static void s_catch_signals (void)
 capkproto::order_cancel
 query_cancel()
 {
+#ifdef LOG
 	pan::log_DEBUG("query_cancel()");
+#endif
     int ret;
 	capkproto::order_cancel oc;
 	oc.set_strategy_id(sid.get_uuid(), sid.size());			
@@ -141,15 +137,18 @@ query_cancel()
 		oc.set_order_qty(d_quantity);
 	}
 	
+#ifdef LOG
 	pan::log_DEBUG("CANCEL: Created message [", pan::integer(oc.ByteSize()), "]\n",  oc.DebugString(), "\n");
-
+#endif
 	return oc;
 }
 
 capkproto::order_cancel_replace
 query_cancel_replace()
 {
+#ifdef LOG
 	pan::log_DEBUG("query_cancel_replace()");
+#endif
     int ret;
 	
 	capkproto::order_cancel_replace ocr;
@@ -198,7 +197,9 @@ query_cancel_replace()
 		ocr.set_order_qty(d_quantity);
 	}
 	
+#ifdef LOG
 	pan::log_DEBUG("CANCEL REPLACE: Created message [", pan::integer(ocr.ByteSize()), "]\n",  ocr.DebugString(), "\n");
+#endif
 
 	return ocr;
 }
@@ -237,7 +238,9 @@ query_order()
 	
 	capkproto::new_order_single nos;
 	nos.set_strategy_id(sid.get_uuid(), sid.size());			
+#ifdef LOG
     pan::log_DEBUG("SETTING SID IN NOS: ", pan::blob(sid.get_uuid(), sid.size()));
+#endif
 
 	// symbol
 	std::string str_symbol;
@@ -284,7 +287,9 @@ query_order()
 	nos.set_account(str_account);
 */
 
+#ifdef LOG
 	pan::log_DEBUG("Created message [", pan::integer(nos.ByteSize()), "]\n",  nos.DebugString(), "\n");
+#endif
 
 	return nos;
 }
@@ -297,7 +302,9 @@ receiveBBOMarketData(zmq::socket_t* sock)
     zmq::message_t tickmsg;
     assert(sock);
     bool rc;
+#ifdef LOG
     pan::log_DEBUG("receiveBBOMarketData()");
+#endif
     rc = sock->recv(&tickmsg, ZMQ_NOBLOCK);
     assert(rc);
     instrument_bbo_protobuf.ParseFromArray(tickmsg.data(), tickmsg.size());
@@ -307,9 +314,11 @@ receiveBBOMarketData(zmq::socket_t* sock)
     // OK - 20120717
     if (instrument_bbo_protobuf.symbol() == "EUR/USD") {
 
+#ifdef LOG
         pan::log_DEBUG("Received market data:\n", 
                 instrument_bbo_protobuf.symbol(), 
                 instrument_bbo_protobuf.DebugString());
+#endif
 
         bbo_book.bid_venue_id = instrument_bbo_protobuf.bid_venue_id();
         bbo_book.bid_price = instrument_bbo_protobuf.bid_price();
@@ -347,8 +356,9 @@ init()
     completedOrders.set_deleted_key(oidDeleted);
 
 
+    try {
     // create the market mux and add order interfaces
-	OrderMux* ptr_order_mux = new OrderMux(&ctx, 
+	ptr_order_mux = new OrderMux(&ctx, 
 				 ORDER_MUX);
 
     capk::ClientOrderInterface* ptr_fxcm_order_interface 
@@ -372,26 +382,30 @@ init()
     */
 	// add interfaces
 	ptr_fxcm_order_interface->init();
-	bool addOK = ptr_order_mux->addOrderInterface(ptr_fxcm_order_interface);
+	bool addOK = ptr_order_mux->addOrderInterface(ptr_fxcm_order_interface, 1000);
+    if (addOK == false) {
+        pan::log_ALERT("Did not add interface to order_mux: ", 
+                ptr_fxcm_order_interface->getInterfaceAddr().c_str(), 
+                " venue id: ", 
+                pan::integer(ptr_fxcm_order_interface->getVenueID()));
+    }
     assert(addOK);
 	// run the order mux
-	boost::thread* t0 = new boost::thread(boost::bind(&OrderMux::run, ptr_order_mux));
+	omux_thread = new boost::thread(boost::bind(&OrderMux::run, ptr_order_mux));
+#ifdef LOG
     pan::log_DEBUG("Sleeping 2");
+#endif
 	sleep(2);
 	// connect the thread local pair socket for order data 
 	pOEInterface = new zmq::socket_t(ctx, ZMQ_PAIR);
 	pOEInterface->setsockopt(ZMQ_LINGER, &zero, sizeof(zero));
 	assert(pOEInterface);
+#ifdef LOG
     pan::log_DEBUG("Connecting order interface socket to: ", ORDER_MUX);
-    try {
-    	pOEInterface->connect(ORDER_MUX);
-    }
-    catch(zmq::error_t err) {
-        std::cerr << "EXCEPTION MUTHAFUCKA(1)! " <<  err.what() << "(" << err.num() << ")" << std::endl;
-    }
+#endif
+   	pOEInterface->connect(ORDER_MUX);
 
-	// send helo msg to each exchange we're connecting to
-    // KTK TODO - SHOULD WAIT FOR ACK!!!!
+   	// send helo msg to each exchange we're connecting to
 	snd_HELO(pOEInterface, sid, capk::kFXCM_VENUE_ID); 
 	//snd_HELO(pOEInterface, sid, kXCDE_VENUE_ID); 
   
@@ -402,7 +416,7 @@ init()
     // MARKET DATA INTERFACE SETUP
     ///////////////////////////////////////////////////////////////////////////
     // create the market data mux
-    MarketDataMux* ptr_market_data_mux = new MarketDataMux(&ctx, 
+    ptr_market_data_mux = new MarketDataMux(&ctx, 
                         MD_MUX);
     // TODO differentiate between bbo stream and depth
     ClientMarketDataInterface* ptr_agg_book_md_interface = 
@@ -415,21 +429,25 @@ init()
     addOK = ptr_market_data_mux->addMarketDataInterface(ptr_agg_book_md_interface);
     assert(addOK);
     // run the market data mux
-    boost::thread* t1 = new boost::thread(boost::bind(&MarketDataMux::run, ptr_market_data_mux));
+    mdmux_thread = new boost::thread(boost::bind(&MarketDataMux::run, ptr_market_data_mux));
+#ifdef LOG
     pan::log_DEBUG("Sleeping 2");
+#endif
     sleep(2);
     // connect the thread local pair socket for market data
     pMDInterface = new zmq::socket_t(ctx, ZMQ_PAIR);
     pMDInterface->setsockopt(ZMQ_LINGER, &zero, sizeof(zero));
     assert(pMDInterface);
+#ifdef LOG
     pan::log_DEBUG("Connecting market data socket to: ", MD_MUX);
-    try {
-        pMDInterface->connect(MD_MUX);
+#endif
+    pMDInterface->connect(MD_MUX);
     }
     catch(zmq::error_t err) {
-        std::cerr << "EXCEPTION MUTHAFUCKA(2)!" <<  err.what() << "(" << err.num() << ")" << std::endl;
+        std::cerr << "EXCEPTION: " <<  err.what() << " (" << err.num() << ")" << std::endl;
+        pan::log_CRITICAL("EXCEPTION: ", err.what(), " (", pan::integer(err.num()), ") - are market data and order interfaces up?");
+        return -1;
     }
-
     return 0;
 
 }
@@ -439,10 +457,12 @@ main(int argc, char **argv)
 {
 	s_catch_signals();
 	GOOGLE_PROTOBUF_VERIFY_VERSION;
-
-	assert(sid.parse(STRATEGY_ID) == 0);
-    pan::log_DEBUG("MY STRATEGY_ID IS: ", pan::blob(sid.get_uuid(), sid.size()));
+    int retOK;
+	retOK = sid.parse(STRATEGY_ID);
+    assert(retOK == 0);
+    pan::log_NOTICE("This strategy id: ", pan::blob(sid.get_uuid(), sid.size()));
     std::string logFileName = createTimestampedLogFilename("test_strategy");
+    pan::log_NOTICE("Creating log file: ", logFileName.c_str());
 	logging_init(logFileName.c_str());
 
     // program options
@@ -460,11 +480,16 @@ main(int argc, char **argv)
         runInteractive = true;
     }
 
-    int initOK = init();
-    pan::log_DEBUG("init() complete");
-    assert(initOK == 0);
-    bool rc;
-    int ret;
+    retOK = init();
+    assert(retOK == 0);
+    if (retOK != 0) {
+        pan::log_CRITICAL("Initialization failed - shutting down.");
+        if (ptr_order_mux) { ptr_order_mux->stop(); }
+        if (ptr_market_data_mux) { ptr_market_data_mux->stop(); }
+        if (omux_thread != NULL) { omux_thread->join(); }
+        if (mdmux_thread != NULL) { mdmux_thread->join(); }
+        exit(-1);
+    }
   
     // setup items to poll - only two endpoint pair sockets 
     zmq::pollitem_t pollItems[] = {
@@ -477,7 +502,7 @@ main(int argc, char **argv)
         // start the polling loop
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("Polling pair sockets in app thread");
-            ret = zmq::poll(pollItems, 2, -1);
+            retOK = zmq::poll(pollItems, 2, -1);
             // receive market data
             if (pollItems[0].revents && ZMQ_POLLIN) {
                 //pan::log_DEBUG("RECEIVING MARKET DATA");
@@ -501,11 +526,9 @@ main(int argc, char **argv)
 
         // start the polling loop
         bool shouldPrompt = true;;
-        char action;
-        int ret;
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("APP Polling pair sockets in app thread");
-            ret = zmq::poll(pollItems, 2, -1);
+            retOK = zmq::poll(pollItems, 2, -1);
             // receive market data
             if (shouldPrompt) {
                 std::cout << "Enter action (n=new; c=cancel; r=replace; q=quit; l=list ): " << std::endl;
@@ -517,11 +540,11 @@ main(int argc, char **argv)
                 receiveOrder(pOEInterface);
             }
             if (pollItems[1].revents && ZMQ_POLLIN) {
-                char buf[16];
                 char action;
-                //fgets(action, sizeof(buf), stdin);
                 action = fgetc(stdin);
+#ifdef LOG
                 pan::log_DEBUG("ACTION RECEIVED: ", pan::character(action));
+#endif
                 switch (action) {
                 case '\n': break;
                 case '\r': break;

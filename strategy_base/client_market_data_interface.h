@@ -11,7 +11,7 @@ class ClientMarketDataInterface
 							zmq::context_t* context, 
 							const std::string& interfaceAddr, 
 							const std::string& inprocAddr):
-		_interfaceID(venueID),
+		_venueID(venueID),
 		_context(context), 
 		_interfaceAddr(interfaceAddr),
 		_inprocAddr(inprocAddr),
@@ -29,14 +29,14 @@ class ClientMarketDataInterface
         void setSubscriptionFilter(const char* filter);
 		const std::string& getInterfaceAddr() const { return _interfaceAddr;}
 		const std::string& getInproAddr() const { return _inprocAddr;}
-		const int getInterfaceID() const { return _interfaceID;}
+		const int getVenueID() const { return _venueID;}
 		zmq::socket_t* getInterfaceSocket() { return _interface;}
 		zmq::socket_t* getInprocSocket() { return _inproc;}
 		bool subscribe(const char*);
 		bool unsubscribe(const char*);
 
 	private:
-		int _interfaceID;
+		int _venueID;
 		zmq::context_t* _context;
 
 		std::string _interfaceAddr;

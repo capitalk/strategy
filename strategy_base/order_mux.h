@@ -19,7 +19,8 @@ class OrderMux
 		~OrderMux();
 
 		// TODO - change to return int = num of installed interfaces?
-		bool addOrderInterface(capk::ClientOrderInterface* oi);
+		bool addOrderInterface(capk::ClientOrderInterface* oi, 
+                const int ping_timeout_us = 500);
 
 		int run();
 		void stop();

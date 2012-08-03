@@ -45,14 +45,13 @@ PANTHEIOS_LIBS= -L $(PANTHEIOS_ROOT)/lib \
         -l pantheios.1.util.gcc44.file64bit \
         -l pantheios.1.core.gcc44.file64bit 
 
-CFLAGS=-Wall -std=c++0x -pthread -O3 -DLOG #-ULOG
+CFLAGS=-Wall -std=c++0x -pthread -O3 -ULOG -DNDEBUG
 LDFLAGS=-static
 
 ifeq ($(dbg),1)
-        CFLAGS = -Wall -std=c++0x -pthread -DDEBUG -ggdb -g  -DLOG
+        CFLAGS = -Wall -std=c++0x -pthread -DDEBUG -ggdb  -DLOG -pg
+		LDFLAGS= -pg
 endif
-
-LDFLAGS=-static
 
 all: all_strategies 
 
@@ -73,7 +72,7 @@ test_strategy.strat: test_strategy.o \
 				client_market_data_interface.o \
 				order.o \
 				$(PROTOBUF_OBJS)  
-	$(CC) $(CFLAGS) test_strategy.o order_manager.o strategy_protocol.o jenkins_hash.o client_order_interface.o order_mux.o logging.o time_utils.o timing.o market_data_mux.o client_market_data_interface.o order.o $(PROTOBUF_OBJS) $(LIBS) $(PANTHEIOS_LIBS) -o $@ 
+	$(CC) $(LDFLAGS) test_strategy.o order_manager.o strategy_protocol.o jenkins_hash.o client_order_interface.o order_mux.o logging.o time_utils.o timing.o market_data_mux.o client_market_data_interface.o order.o $(PROTOBUF_OBJS) $(LIBS) $(PANTHEIOS_LIBS) -o $@ 
 
 test_strategy.o: test_strategy.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<

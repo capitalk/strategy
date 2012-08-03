@@ -13,7 +13,7 @@ class ClientOrderInterface
 							const std::string& interfaceAddr, 
 							const std::string& pingAddr, 
 							const std::string& inprocAddr):
-		_interfaceID(venueID),
+		_venueID(venueID),
 		_context(context), 
 		_interfaceAddr(interfaceAddr),
 		_pingAddr(pingAddr),
@@ -32,12 +32,12 @@ class ClientOrderInterface
 		inline const std::string& getInterfaceAddr() const { return _interfaceAddr;}
 		inline const std::string& getPingAddr() const { return _pingAddr;}
 		inline const std::string& getInprocAddr() const { return _inprocAddr;}
-		inline const int getInterfaceID() const { return _interfaceID;}
+		inline const int getVenueID() const { return _venueID;}
 		inline zmq::socket_t* getInterfaceSocket() { return _interface;}
 		inline zmq::socket_t* getInprocSocket() { return _inproc;}
 
 	private:
-		int _interfaceID;
+		int _venueID;
 		zmq::context_t* _context;
 
 		std::string _interfaceAddr;

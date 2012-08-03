@@ -42,12 +42,12 @@ OrderMux::stop()
 
 // TODO - change to return int = num of installed interfaces
 bool 
-OrderMux::addOrderInterface(capk::ClientOrderInterface* oi) 
+OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
+        const int ping_timeout_us)
 {
     if (!oi) { 
         return false;
     }
-    const int ping_timeout_us = 1000;
 
     int pingOK = PING(oi->getContext(), 
             oi->getPingAddr().c_str(), 
@@ -64,6 +64,7 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi)
         if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
             _oiArray[_oiArraySize] = oi;	
             _oiArraySize++;
+            pan::log_DEBUG("Adding order interface: ", pan::integer(oi->getVenueID()), " [", pan::integer(_oiArraySize), "]");
             return true;
         }
     }
@@ -73,12 +74,13 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi)
 int	
 OrderMux::run()
 {
-	//try {
+	try {
 		assert(_context != NULL);
 
 		_inproc = new zmq::socket_t(*_context, ZMQ_PAIR);
 		assert(_inproc);
-		pan::log_INFORMATIONAL("Binding OrderMux inproc addr: ", _inprocAddr.c_str());
+		pan::log_INFORMATIONAL("Binding OrderMux inproc addr: ", 
+                _inprocAddr.c_str());
 		_inproc->bind(_inprocAddr.c_str());
 /*
 		for (size_t i = 0; i<_oiArraySize; i++) {
@@ -102,7 +104,26 @@ OrderMux::run()
 			_poll_items[i+1].events = ZMQ_POLLIN;
 			_poll_items[i+1].revents = 0;
 		}
-		
+        pan::log_DEBUG("Waiting for order interfaces...");
+        int64_t  x;
+        while (_oiArraySize < 1) {
+            x++;
+            timespec req;
+            req.tv_nsec = 500;
+            timespec rem;
+            nanosleep(&req, &rem);
+        }
+/*
+	    if (_oiArraySize < 2) { // inproc socket is one
+            pan::log_CRITICAL("NO ORDER INTERFACES INSTALLED [", 
+                    pan::integer(_oiArraySize), "]");
+            return -1;
+        }
+*/
+		pan::log_INFORMATIONAL("Number of interfaces installed: ",
+               pan::integer( _oiArraySize));
+
+	
 		bool rc = false;
 		int ret = -1;	
 		int64_t more = 0;
@@ -130,7 +151,7 @@ OrderMux::run()
 
 					size_t sockIdx;
 					for (sockIdx = 0; sockIdx < _oiArraySize; sockIdx++) {
-						if (_oiArray[sockIdx]->getInterfaceID() == venue_id) {
+						if (_oiArray[sockIdx]->getVenueID() == venue_id) {
 							venue_sock = _oiArray[sockIdx]->getInterfaceSocket();
 							assert(venue_sock);
 #ifdef LOG
@@ -168,12 +189,13 @@ OrderMux::run()
 				}
 			}		
 		}
-	//}
-/*
+	}
+	catch(zmq::error_t e) {
+		pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what(), " (", pan::integer(e.num()), ")");
+	}	
 	catch(std::exception& e) {
 		pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what());
 	}	
-*/
 	return 0;
 }
 
