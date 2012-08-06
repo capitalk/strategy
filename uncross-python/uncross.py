@@ -8,13 +8,25 @@ import order_engine_constants
 from enum import enum 
 
 
-LOCAL_ORDER_STATUS = enum(WAITING = -1, SENT = -2)
 
+STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
 
-Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'timestamp'))
+Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'symbol', 'timestamp'))
 # a pair of entries for bid and offer
-Cross = collections.namedtuple('Cross', ('bid', 'offer'))
-
+class Cross:
+  def __init__(self, bid, offer):
+    self.bid = bid
+    self.offer = offer
+    self.start_time = time.time()
+    self.send_time = None
+    self.bid_id = None
+    self.offer_id = None
+  
+  def sent(self, bid_id, offer_id):
+    self.bid_id = bid_id
+    self.offer_id = offer_id
+    self.sent_time = time.time()
+    
 symbols_to_bids = {} 
 # map each symbol (ie USD/JPY) to a dictionary from venue_id's to offer entries
 symbols_to_offers = {}
@@ -24,241 +36,44 @@ updated_symbols = set([])
 
 context = zmq.Context()
 
-"""
-message execution_report {
-    optional bytes      cl_order_id = 1;
-    optional bytes      orig_cl_order_id = 2;
-    optional string     exec_id = 3;
-    optional sfixed32   exec_trans_type = 4;
-    optional sfixed32   order_status = 5;
-    optional sfixed32   exec_type = 6;
-    optional string     symbol = 7;
-    optional string     security_type = 8;
-    optional side_t     side = 9;
-    optional double     order_qty = 10;
-    optional sfixed32   ord_type = 11;
-    optional double     price = 12;
-    optional double     last_shares = 13;
-    optional double     last_price = 14;
-    optional double     leaves_qty = 15;
-    optional double     cum_qty = 16;
-    optional double     avg_price = 17;
-    optional sfixed32   time_in_force = 18;
-    optional string     transact_time = 19;
-    optional string     exec_inst = 20;
-    optional sfixed32   handl_inst = 21;
-    optional sfixed32   order_reject_reason = 22;
-    optional double     min_qty = 23;
-    optional sfixed32   venue_id = 24;
-    optional string     account = 25;
-}
-"""
-
-
-
-def handle_execution_report(er):
-  order_id = er.cl_order_id
-  # only used for cancel and cancel/replace
-  original_order_id = er.orig_cl_order_id 
-  
-  status = er.order_status
-  exec_type = er.exec_type
-
-  if status == ORDER_STATUS.NEW:
-    assert order_id in order_manager
-    order = order_manager[order_id]
+current_cross = None
     
-    # some ECN's don't tell us about pending changes
-    assert order.state in [None, ORDER_STATUS.PENDING_NEW] \
-      "Order %d's state got updated to NEW but was previously %s" % (order_id, order.state)
-    assert order.size == er.order_qty
-    assert order.price == er.price 
-    order.state = ORDER_STATUS.NEW
-  elif  status == ORDER_STATUS.PARTIAL_FILL:
-    assert exec_type != EXEC_TYPE.REPLACE,\
-      "BOTH replaced and partial fill: order = %s, original_order = %s" % (order_id, original_order_id)
-  elif status = ORDER_STATUS.FILL:
-    assert exec_type != EXEC_TYPE.REPLACE, \
-      "BOTH filled and replaced: order = %s, original_order = %s" % (order_id, original_order_id)
-    
-    order_map_insert_t insert = 
-      completedOrders.insert(order_map_value_t(oid, order)); 
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to completed: ", 
-                    pan::blob(oid.get_uuid(), oid.size()));
-        }
-
-        // delete from working orders
-        order_map_iter_t orderIter = workingOrders.find(oid);
-        if (orderIter == workingOrders.end()) {
-            pan::log_CRITICAL("OID: ", 
-            pan::blob(oid.get_uuid(), oid.size()), 
-            " not found in working orders");
-        }
-        else {
-            pan::log_DEBUG("Deleting filled order from working orders");
-            workingOrders.erase(orderIter);
-        }
-    }
-
-    if (ordStatus == capk::ORD_STATUS_CANCELLED) {
-
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("ORIGOID: ", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " CLOID: (",pan::blob(oid.get_uuid(), oid.size()),")", 
-                        " CANCELLED ", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-
-        order_map_iter_t orderIter = workingOrders.find(origOid);  
-        if (orderIter != workingOrders.end()) {
-            pan::log_DEBUG("Deleting order from working orders");
-            workingOrders.erase(orderIter);
-        }
-        else {
-            pan::log_WARNING("ORIGOID: ", 
-                pan::blob(origOid.get_uuid(), origOid.size()), 
-                " cancelled but not found in working orders");
-            order_map_iter_t pendingIter = pendingOrders.find(origOid);
-            if (pendingIter != pendingOrders.end()) {
-                pendingOrders.erase(pendingIter);
-            }
-            else {
-                pan::log_WARNING("OID: ", 
-                    pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " cancelled but not found in working OR pending orders");
-            }
-        }
-    }
-
-    // origClOid is the original order that was replaced
-    // so now the new order has working order id of clOrdId 
-    // with the parameters that were sent in the replace msg
-    if (ordStatus == capk::ORD_STATUS_REPLACE) {
-
-        // insert the new order id which is in clOrdId NOT origClOid
-        order_map_insert_t insert = 
-           workingOrders.insert(order_map_value_t(oid, order)); 
-
-        order_map_iter_t orderIter = workingOrders.find(origOid);
-        // orig order must be found in working orders
-        assert(orderIter != workingOrders.end());
-        
-        // delete the old order id
-        workingOrders.erase(orderIter);
-    }
-
-    if (ordStatus == capk::ORD_STATUS_PENDING_CANCEL) {
-        // We had a partial fill while pending cancel - handle it
-        if (order.getExecType() == capk::EXEC_TYPE_PARTIAL_FILL) {
-            pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " partial fill while pending cancel");
-            completedOrders.insert(order_map_value_t(origOid, order));
-        }
-        order_map_insert_t insert = 
-                pendingOrders.insert(order_map_value_t(origOid, order));
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to pending: ",
-                        pan::blob(origOid.get_uuid(), origOid.size()));
-        }
-    }
-    if (ordStatus == capk::ORD_STATUS_PENDING_REPLACE) {
-        if (order.getExecType() == capk::EXEC_TYPE_PARTIAL_FILL) {
-            pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " partial fill while pending replace");
-            completedOrders.insert(order_map_value_t(origOid, order));
-        }
-        order_map_insert_t insert = 
-                pendingOrders.insert(order_map_value_t(origOid, order));
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to pending: ",
-                        pan::blob(origOid.get_uuid(), origOid.size()));
-        }
-
-      
-    if (ordStatus == capk::ORD_STATUS_REJECTED) {
-      pan::log_DEBUG("Deleting rejected order from pending");
-      pendingOrders.erase(orderIter);
-
-    }
-"""
-class OrderInfo:
-  WAIT = 0 
-  NEW = 1
-  INSERTED = 2
-  def __init__(self, delay = None):
-    """
-    Status transitions for an order:
-    - Upon creation an order is in WAIT, 
-      until the current time exceeds self.wait_until
-    - Once the order has been placed it switches to NEW
-    - If the order gets filled it switches to FILLED
-    - 
-    """
-    self.status = None
-    self.wait_until = time.time()
-    if delay: 
-      self.wait_until += delay
-    
-    
-    
-def update_market_data(bbo, market_data):
+def update_market_data(bbo):
   timestamp = time.time()
   print "Symbol", bbo.symbol
   print "Venue", bbo.bb_venue_id
   symbol, venue_id = bbo.symbol, bbo.bb_venue_id  
-  new_bid = Entry(bbo.bb_price, bbo.bb_size, venue_id, timestamp)  
-  new_offer = Entry(bbo.ba_price, bbo.ba_size, venue_id, timestamp)
+  new_bid = Entry(bbo.bb_price, bbo.bb_size, venue_id, bbo.symbol, timestamp)  
+  new_offer = Entry(bbo.ba_price, bbo.ba_size, venue_id, bbo.symbol, timestamp)
   
   print "Bid", new_bid
   print "Offer", new_offer
     
-  bids = market_data.symbols_to_bids.setdefault(symbol, {})
+  bids = symbols_to_bids.setdefault(symbol, {})
   old_bid = bids.get(venue_id)
   
   if old_bid != new_bid:
-    market_data.updated_symbols.add(symbol)
+    updated_symbols.add(symbol)
     bids[venue_id] = new_bid
     
-  offers = market_data.symbols_to_offers.setdefault(symbol, {})
+  offers = symbols_to_offers.setdefault(symbol, {})
   old_offer = offers.get(venue_id)
   if old_offer != new_offer:
-    market_data.updated_symbols.add(symbol)
+    updated_symbols.add(symbol)
     offers[venue_id] = new_offer
   
 
 
-pending_cross = None
-pending_cross_start_time = None 
-
-      class OrderInfo:
-        def __init__(self):
-          # at the end of find_best_crossed_pair we are allowd to pick one crossed
-          # pair and designate it as a pending order. If the order is still possible 
-          # after 5ms then we'll place it 
-          self.bid = None
-          self.bid_status = None
-          self.bid_last_update_time = None
-
-          self.offer = None
-          self.offer_status = None
-          self.offer_last_update_time = None
-
-def find_best_crossed_pair(market_data, order_state, min_cross_magnitude = 50):
-  assert order_state.pending_cross is None
-  if len(market_data.updated_symbols) == 0: return
-  print "UPDATED SYMBOLS", market_data.updated_symbols
-  market_data.updated_symbols.clear()
+def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
+  assert current_cross is None
+  if len(updated_symbols) == 0: return
+  print "UPDATED SYMBOLS", updated_symbols
+  updated_symbols.clear()
   best_cross = None
   best_cross_magnitude = min_cross_magnitude
-  for symbol, bid_venues) in market_data.symbols_to_bids.iteritems():
+  for (symbol, bid_venues) in symbols_to_bids.iteritems():
     yen_pair = "JPY" in symbol
-    offer_venues = market_data.symbols_to_offers[symbol]
+    offer_venues = symbols_to_offers[symbol]
     # bids sorted from highest to lowest 
     sorted_bids = sorted(bid_venues, key=lambda (v,e): e.price, reverse=True)
     # offers from lowest to highest
@@ -267,51 +82,16 @@ def find_best_crossed_pair(market_data, order_state, min_cross_magnitude = 50):
       for (offer_venue, offer_entry) in sorted_offers:
         if bid_entry.price <= offer_entry.price: break
         else:
-          min_size = min(bid_entry.size, offer_entry.size)
+          cross_size = min(bid_entry.size, offer_entry.size)
           price_difference = bid_entry.price - offer_entry.price
-          cross_magnitude = price_difference * min_size
+          cross_magnitude = price_difference * cross_size
           if yen_pair: cross_magnitude /= 80
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid = bid_entry, offer = offer_entry)
             best_cross_magnitude = cross_magnitude 
             print "Found better cross: ", best_cross
-          # even if we're not the best, prefer crosses going between venues
-          # to those on a single venue 
-          elif best_cross is not None and \
-            cross_magnitude > 
-            best_cross.bid.venue == best_cross.offer.venue and \
-            
-      assert len(offer_venues) == len(bid_venues)
-      best_bid = None; best_offer = None
-      best_bid_size = None; best_offer_size = None
-      best_bid_venue = None; best_offer_venue = None
-      for (i, (venue_id, entry)) in enumerate(venues.iteritems()):
-        bid, offer, bid_size, offer_size = entry 
-        if i == 0:
-          best_bid = bid; best_offer = offer
-          best_bid_size = bid_size; best_offer_size = offer_size
-          best_bid_venue = venue_id; best_offer_venue = venue_id
-        if bid > best_bid:
-            best_bid = bid; best_bid_venue = venue_id
-          elif bid == best_bid and bid_size > best_bid_size:
-            best_bid_size = bid_size; best_bid_venue = venue_id
-
-          if offer < best_offer:
-            best_offer = offer; best_offer_venue = venue_id 
-          elif offer == best_offer and offer_size > best_offer_size:
-            best_offer_size = offer_size; best_offer_venue = venue_id
-        if best_bid > best_offer:
-          print symbol, "crossed with bid=", best_bid, "(venue =", best_bid_venue,") and offer =", best_offer, "(venue =", best_offer_venue, ")"
-    gevent.sleep(0)
-
-def receive_order_updates(order_addr, order_port):
-  socket = make_subscriber(order_addr, order_port)
-  while True:
-    msg_parts = socket.recv_multipart()
-    print msg_parts
-    gevent.sleep(0)
-
-STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022' 
+  return best_cross
+     
 
 def say_hello(order_control_socket):
   socket.send_multipart([order_engine_constants.STRATEGY_HELO, STRATEGY_ID])
@@ -331,99 +111,125 @@ def synchronize_market_data(market_data_socket, wait_time):
       receive_market_data(msg)
   print "Waited", wait_time, "seconds, entering main loop"
 
-def main_loop(market_data_socket, order_socket):
+def outgoing_logic(order_socket, order_manager, new_order_delay = 0,  max_order_lifetime = 5):
+  curr_time = time.time()
+  if current_cross is None:
+    current_cross = find_best_crossed_pair()
+    
+  # if we've identified a cross but haven't sent it yet 
+  # (and we're past the delay period) then send it to the order engine
+  if current_cross is not None:
+    bid = current_cross.bid
+    offer = current_cross.offer
+    
+    if cross.send_time is None and (cross.start_time + new_order_delay >= curr_time):
+      print "Sending orders for %s" % current_cross
+      bid_pb = order_manager.make_new_order(bid.venue, bid.symbol, order_manager.BID, bid.price, bid.size)
+      order_engine.send_multipart([order_engine_constants.ORDER_NEW, bid_pb])
+      offer_pb = order_manager.make_new_order(offer.venue, offer.symbol, order_manager.OFFER, offer.price, offer.size)
+      order_engine.send_multipart([order_engine_constants.ORDER_NEW, offer_pb])
+      current_cross.sent(bid_pb.cl_order_id, offer_pb.cl_order_id)
+      
+    # if we've already sent an order, check if it's expired
+    elif current_cross.send_time is not None:
+      bid_still_alive = current_cross.bid_id in order_manager.live_order_ids
+      offer_still_alive = current_cross.offer_id in order_manager.live_order_ids
+      expired = current_cross.send_time + max_order_lifetime >= curr_time
+      if bid_still_alive and offer_still_alive and expired:
+        # if both orders still alive and expired, cancel them both
+      elif bid_still_alive and expired:
+        # bid is alive and expired, cancel/replace it to a shitty price
+        # to make sure we get a fill 
+      elif offer_still_alive and expired:
+        # offer is still alive and expired, cancel/replace it to a shitty 
+        # price to make sure we get a fill
+      else:
+        # both orders are gone! 
+        current_cross = None
+        
+def main_loop(market_data_socket, order_socket, new_order_delay = 0, max_order_lifetime = 5):
   poller = zmq.Poller()
   poller.register(market_data_socket, zmq.POLLIN)
   poller.register(order_socket,  zmq.POLLIN|zmq.POLLOUT)
-  
   while True:
-    ready_sockets = dict(poller.poll(1000))
+    ready_sockets = dict(poller.poll(1000))    
     if ready_sockets.get(market_data_socket) == zmq.POLLIN:
       print "POLLIN: market data"
       msg = market_data_socket.recv()
       bbo = spot_fx_md_1_pb2.instrument_bbo();
       bbo.ParseFromString(msg)
       update_market_data(bbo)
+    
     if ready_sockets.get(order_socket) == zmq.POLLIN:
       print "POLLIN: order engine"
-      msg = order_socket.recv()
-      execution_report = SOME_PROTO_BUF
-      execution_report.ParseFromString(msg)
-      update_order_state(execution_report)
+      [tag, msg] = order_socket.recv_multipart()
+      order_manager.received_message_from_order_engine(tag, msg)
+      
     elif ready_sockets.get(order_socket) == zmq.POLLOUT:
       print "POLLOUT: order engine"
-      if updated
-
-
-
-from argparse import ArgumentParser 
-parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--market-data', type=str, nargs='+', dest = 'md_addrs')
-parser.add_argument('--order-engine', type=str, default='tcp://127.0.0.1', dest='order_addr')
-parser.add_argument('--order-engine-control-port', type=int, default=None, dest='order_control_port')
-parser.add_argument('--order-engine-port', type=int, default=None, dest='order_port')
-parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_wait_time', 
-  help="How many seconds to wait at startup until market data is synchronized")
-
-
+      outgoing_logic(order_socket, order_manager, new_order_delay, max_order_lifetime)
+            
+          
 def init(args):
   md_socket = context.socket(zmq.SUB)
-  for addr in args.md_addrs:
-     socket.connect(addr)
-    md_target = "%s:%s" % (args.md_addrs)
-  print "Making socket for", target
- 
+  #for addr in args.md_addrs:
+  #   socket.connect(addr)
+  #  md_target = "%s:%s" % (args.md_addrs)
+  #  print "Making socket for", target
+  print "Connecting Market Data to %s" % args.md_addr
+  md_socket.connect(args.md_addr)
+  
   if symbols is None:
     print "Subscribing to all messages" 
     socket.setsockopt(zmq.SUBSCRIBE, "")
-  
-  market_data_socket = make_subscriber(args.md_addr, args.md_port) 
-  if args.order_port and args.order_control_port:
+  else:
+    raise RuntimeError("Removed support for selective subscriptions!")
+
+  if args.order_engine_addr and args.order_engine_control_addr:
     # the order socket is the one through which we send orders and
     # receive execution reports 
-    order_socket = receive_order_updates(args.order_addr, args.order_port)
-    order_target = "%s:%s" % (args.order_addr, args.order_port)
-    print "Connecting Order Engine socket to", order_target
-    order_socket.connect(order_target)
+    order_socket = context.socket(zmq.DEALER)
+    print "Connecting Order Engine socket to", args.order_engine_addr
+    order_socket.connect(args.order_engine_addr)
     
-    # the order control socket is a blocking socket through which we 
-    # register our strategy
     order_control_socket = context.socket(zmq.REQ)
-    control_target = "%s:%s" % (args.order_addr, args.order_control_port)
-    print "Connecting Order Engine control socket to", control_target
-    order_control_socket.connect(control_target)
+    print "Connecting Order Engine Control socket to %s" % args.order_engine_control_addr
+    order_control_socket.connect(args.order_engine_control_addr)
     
     got_ack = say_hello(order_control_socket)
     if not got_ack:
       raise RuntimeError("Couldn't connect to order engine")
-  else:
-    if args.order_port:
-      print "If you give an order engine port you must also give an order engine control port"
-    elif args.order_control_port:
-      print "If you give an order engine port you must also give an order engine control port"
+  elif args.order_engine_addr or args.order_engine_control_addr:
+    print "Warning: If you give an order engine port you must also give an order engine control port"
     order_socket = None
     order_control_socket = None
+  else:
+    print "No order engine addresses given, only subscribing to market data"
+    order_socket = None
+    order_control_socket = None
+  return md_socket, order_socket, order_control_socket
+  
+    
+
+from argparse import ArgumentParser 
+parser = ArgumentParser(description='Market uncrosser') 
+parser.add_argument('--market-data', type=str, required=True, dest = 'md_addr')
+parser.add_argument('--order-engine', type=str, default= None, dest='order_engine_addr')
+parser.add_argument('--order-engine-control', type=str, default=None, dest='order_engine_control_addr')
+parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
+parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
+  help='How many milliseconds should I delay orders by?')
+parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_wait_time', 
+  help="How many seconds to wait at startup until market data is synchronized")
+
   
 
 if __name__ == '__main__':
   args = parser.parse_args()
-  
+  md_socket, order_socket, order_control_socket = init(args)
   synchronize_with_market(market_data_socket, args.startup_wait_time)
   poll_loop(market_data_socket, order_socket)
   
   
   
     
-  #def read_symbols(filename):
-  #  f = open(filename)
-  #  syms = [] 
-  #  for line in f.readlines():
-  #    line = line.strip()
-  #    if len(line) == 0: continue
-  #    elif len(line) != 7 or line[3] != "/": 
-  #      raise RuntimeError("Invalid ccy format " + line)
-  #    else:
-  #      syms.append( line)
-  #  f.close()
-  #  print syms 
-  #  return syms
