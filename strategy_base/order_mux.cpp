@@ -1,5 +1,6 @@
 #include "order_mux.h"
 #include "msg_types.h"
+#include "strategy_protocol.h"
 
 #include "proto/execution_report.pb.h"
 #include "proto/order_cancel_reject.pb.h"
@@ -41,15 +42,31 @@ OrderMux::stop()
 
 // TODO - change to return int = num of installed interfaces
 bool 
-OrderMux::addOrderInterface(capk::ClientOrderInterface* oi) 
+OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
+        const int ping_timeout_us)
 {
     if (!oi) { 
         return false;
     }
-    if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
-        _oiArray[_oiArraySize] = oi;	
-        _oiArraySize++;
-        return true;
+
+    int pingOK = PING(oi->getContext(), 
+            oi->getPingAddr().c_str(), 
+            ping_timeout_us);
+
+    if (pingOK != 0) {
+        pan::log_CRITICAL("PING failed to: ", 
+                oi->getPingAddr().c_str(), 
+                " with timeout (us): ", 
+                pan::integer(ping_timeout_us), 
+                " NOT ADDING INTERFACE");
+    }
+    else {
+        if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
+            _oiArray[_oiArraySize] = oi;	
+            _oiArraySize++;
+            pan::log_DEBUG("Adding order interface: ", pan::integer(oi->getVenueID()), " [", pan::integer(_oiArraySize), "]");
+            return true;
+        }
     }
     return false;
 }
@@ -57,12 +74,13 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi)
 int	
 OrderMux::run()
 {
-	//try {
+	try {
 		assert(_context != NULL);
 
 		_inproc = new zmq::socket_t(*_context, ZMQ_PAIR);
 		assert(_inproc);
-		pan::log_INFORMATIONAL("Binding OrderMux inproc addr: ", _inprocAddr.c_str());
+		pan::log_INFORMATIONAL("Binding OrderMux inproc addr: ", 
+                _inprocAddr.c_str());
 		_inproc->bind(_inprocAddr.c_str());
 /*
 		for (size_t i = 0; i<_oiArraySize; i++) {
@@ -86,17 +104,45 @@ OrderMux::run()
 			_poll_items[i+1].events = ZMQ_POLLIN;
 			_poll_items[i+1].revents = 0;
 		}
-		
+
+/*
+        pan::log_DEBUG("Waiting for order interfaces...");
+        int64_t  x;
+        while (_oiArraySize < 1) {
+            x++;
+            timespec req;
+            req.tv_nsec = 500;
+            timespec rem;
+            nanosleep(&req, &rem);
+        }
+*/
+/*
+	    if (_oiArraySize < 2) { // inproc socket is one
+            pan::log_CRITICAL("NO ORDER INTERFACES INSTALLED [", 
+                    pan::integer(_oiArraySize), "]");
+            return -1;
+        }
+*/
+		pan::log_INFORMATIONAL("Number of interfaces installed: ",
+               pan::integer( _oiArraySize));
+
+	
 		bool rc = false;
 		int ret = -1;	
 		int64_t more = 0;
 		size_t more_size = sizeof(more);
 		while (1 && _stopRequested == false) {
-			ret = zmq::poll(_poll_items, _oiArraySize + 1, -1);
-			if (ret < 0) {
-				pan::log_CRITICAL("zmq::poll returned errno: ", pan::integer(zmq_errno()));
-				return -1;
-			}		
+			//ret = zmq::poll(_poll_items, _oiArraySize + 1, -1);
+            /* N.B
+             * DO NOT USE THE C++ version of poll since this will throw
+             * an exception when the spurious EINTR is returned. Simply
+             * check for it here, trap it, and move on.
+             */
+            ret = zmq_poll(_poll_items, _oiArraySize + 1, -1);
+            if (ret == -1 and zmq_errno() == EINTR) {
+                pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
+                continue;
+            }
 
 			// outbound orders routed to correct venue 
 			if (_poll_items[0].revents & ZMQ_POLLIN) {
@@ -114,7 +160,7 @@ OrderMux::run()
 
 					size_t sockIdx;
 					for (sockIdx = 0; sockIdx < _oiArraySize; sockIdx++) {
-						if (_oiArray[sockIdx]->getInterfaceID() == venue_id) {
+						if (_oiArray[sockIdx]->getVenueID() == venue_id) {
 							venue_sock = _oiArray[sockIdx]->getInterfaceSocket();
 							assert(venue_sock);
 #ifdef LOG
@@ -152,12 +198,13 @@ OrderMux::run()
 				}
 			}		
 		}
-	//}
-/*
+	}
+	catch(zmq::error_t e) {
+		pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what(), " (", pan::integer(e.num()), ")");
+	}	
 	catch(std::exception& e) {
 		pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what());
 	}	
-*/
 	return 0;
 }
 

@@ -1,9 +1,14 @@
 #include "strategy_protocol.h"
 
+/*
+ * Async snd_HELO - 
+ * N.B. USE THIS WHEN SENDING FROM MUX ASYNC - USE THE SYNC VERSION 
+ * WHEN SENDING DIRECT!
+ */
 int 
 snd_HELO(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id, 
-        const capk::venue_id_t venueID) {
+        const capk::venue_id_t venue_id) {
 	// Send the HELO msg to set the route
 /*
 	int64_t more = 0;
@@ -11,21 +16,21 @@ snd_HELO(zmq::socket_t* order_interface,
 */
 	bool rc;
 #ifdef LOG
-	pan::log_DEBUG("Sending venueID");
+	pan::log_DEBUG("Sending venue_id (async)");
 #endif
-	zmq::message_t venue_id_msg(sizeof(venueID));
-	memcpy(venue_id_msg.data(), &venueID, sizeof(venueID));
+	zmq::message_t venue_id_msg(sizeof(venue_id));
+	memcpy(venue_id_msg.data(), &venue_id, sizeof(venue_id));
 	rc = order_interface->send(venue_id_msg, ZMQ_SNDMORE);
 
 #ifdef LOG
-	pan::log_DEBUG("sending HELO msg type");
+	pan::log_DEBUG("sending HELO msg type (async)");
 #endif
 	zmq::message_t msg_helo(sizeof(capk::STRATEGY_HELO));
 	memcpy(msg_helo.data(), &capk::STRATEGY_HELO, sizeof(capk::STRATEGY_HELO));
 	rc = order_interface->send(msg_helo, ZMQ_SNDMORE);
 
 #ifdef LOG
-	pan::log_DEBUG("sending HELO msg body");
+	pan::log_DEBUG("sending HELO msg body (async)");
 #endif
 	zmq::message_t msg_sid(strategy_id.size());
 	memcpy(msg_sid.data(), strategy_id.uuid(), strategy_id.size());
@@ -41,6 +46,63 @@ snd_HELO(zmq::socket_t* order_interface,
 
 	return 0;
 }
+
+
+/* 
+ * Send SYNCHRONOUS PING msg  
+ */
+int 
+PING(zmq::context_t* pzmq_ctx, 
+        const char* interface_ping_addr, 
+        const int64_t poll_timeout_us)
+{
+
+    assert(pzmq_ctx);
+    assert(interface_ping_addr && *interface_ping_addr);
+
+	bool rc;
+    zmq::socket_t ping_sock(*pzmq_ctx, ZMQ_REQ);  
+//#ifdef LOG
+	pan::log_DEBUG("snd_PING connecting to ping interface on: ",
+            interface_ping_addr);
+//#endif
+    ping_sock.connect(interface_ping_addr);
+	zmq::message_t ping_frame(sizeof(capk::PING));
+	memcpy(ping_frame.data(), &capk::PING, sizeof(capk::PING));
+//#ifdef LOG
+    T0(a);
+    pan::log_DEBUG("Sent PING msg (", to_simple_string(a).c_str(), ")");
+//#endif
+	rc = ping_sock.send(ping_frame, 0);
+
+    zmq::pollitem_t poll_items[] = {
+        {ping_sock, NULL, ZMQ_POLLIN, 0}
+    };
+    int ret = -1;
+    while (1) {
+        //ret = zmq::poll(poll_items, 1, poll_timeout_us);
+        ret = zmq_poll(poll_items, 1, poll_timeout_us);
+        if (ret == -1 || ret == 0) {
+            return -1;
+        }
+        if (poll_items[0].revents & ZMQ_POLLIN) {
+            zmq::message_t msg_type_frame;
+            ping_sock.recv(&msg_type_frame, 0);
+            capk::msg_t msg_type = (*(static_cast<capk::msg_t*>(msg_type_frame.data())));
+            if (msg_type == capk::PING_ACK) {
+                T0(a);
+                pan::log_DEBUG("Received PING_ACK msg (", to_simple_string(a).c_str(), ")");
+                return 0;
+            }
+            else {
+                pan::log_CRITICAL("Received UNKNOWN msg type in response to PING: ", pan::integer(msg_type));
+                return -1;
+            }
+        }
+    }
+	return -1;
+}
+
 
 
 void 
@@ -110,7 +172,9 @@ snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface,
 #endif
 	rc = order_interface->send(msg, 0);
 	assert(rc == true);
+#ifdef LOG
 	pan::log_DEBUG("CANCEL REPLACE: Msg sent");
+#endif
 }
 
 
