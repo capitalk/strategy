@@ -7,9 +7,9 @@ from fix_constants import EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
 from collections import namedtuple
 
 import proto_objs
-from proto_objs.exec_report_pb2 import execution_report
+from proto_objs.execution_report_pb2 import execution_report
 from proto_objs.order_cancel_pb2 import order_cancel
-from proto_objs.order_cancel_rej_pb2 import order_cancel_reject
+from proto_objs.order_cancel_reject_pb2 import order_cancel_reject
 from proto_objs.new_order_single_pb2 import new_order_single
 from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
 

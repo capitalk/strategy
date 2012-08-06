@@ -36,10 +36,10 @@ current_cross = None
 def update_market_data(bbo):
   timestamp = time.time()
   print "Symbol", bbo.symbol
-  print "Venue", bbo.bb_venue_id
-  symbol, venue_id = bbo.symbol, bbo.bb_venue_id  
-  new_bid = Entry(bbo.bb_price, bbo.bb_size, venue_id, bbo.symbol, timestamp)  
-  new_offer = Entry(bbo.ba_price, bbo.ba_size, venue_id, bbo.symbol, timestamp)
+  print "Venue", bbo.bid_venue_id
+  symbol, venue_id = bbo.symbol, bbo.bid_venue_id  
+  new_bid = Entry(bbo.bid_price, bbo.bid_size, venue_id, bbo.symbol, timestamp)  
+  new_offer = Entry(bbo.ask_price, bbo.ask_size, venue_id, bbo.symbol, timestamp)
   
   print "Bid", new_bid
   print "Offer", new_offer
@@ -70,9 +70,9 @@ def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
     yen_pair = "JPY" in symbol
     offer_venues = symbols_to_offers[symbol]
     # bids sorted from highest to lowest 
-    sorted_bids = sorted(bid_venues, key=lambda (v,e): e.price, reverse=True)
+    sorted_bids = sorted(bid_venues.items(), key=lambda (v,e): e.price, reverse=True)
     # offers from lowest to highest
-    sorted_offers = sorted(offer_venues, key=lambda (v,e): e.price)
+    sorted_offers = sorted(offer_venues.items(), key=lambda (v,e): e.price)
     for (bid_venue, bid_entry) in sorted_bids:
       for (offer_venue, offer_entry) in sorted_offers:
         if bid_entry.price <= offer_entry.price: break
@@ -228,8 +228,8 @@ def init(md_addrs, order_engine_addrs, symbols = None):
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--market-data', type=str, nargs='+',  dest = 'md_addrs')
-parser.add_argument('--order-engine', type=str, nargs='*', dest='order_engine_addrs')
+parser.add_argument('--market-data', type=str, nargs='*', default=[],  dest = 'md_addrs')
+parser.add_argument('--order-engine', type=str, nargs='*', default = [], dest='order_engine_addrs')
 parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
 parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
   help='How many milliseconds should I delay orders by?')
@@ -239,6 +239,7 @@ parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_
   
 if __name__ == '__main__':
   args = parser.parse_args()
+  assert len(args.md_addrs) > 0
   md_socket, order_sockets, _ = init(args.md_addrs, args.order_engine_addrs)
   synchronize_market_data(md_socket, args.startup_wait_time)
   main_loop(md_socket, order_sockets)
