@@ -2,7 +2,7 @@ import uuid
 import time
 import datetime
 import order_engine_constants 
-from fix_constants import ORDER_TYPE, TIME_IN_FORCE
+from fix_constants import ORDER_TYPE, TIME_IN_FORCE, HANDLING_INSTRUCTION
 from fix_constants import EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
 from collections import namedtuple
 
@@ -33,9 +33,8 @@ so keep just one order object around but update its ID and properties.
 def fresh_id():
   return str(uuid.uuid4())
 
-
 PendingChange = namedtuple('PendingChange', \
-  ('request_id', 'old_id', 'price', 'qty', 'status', 'timestamp')
+  ('request_id', 'old_id', 'price', 'qty', 'status', 'timestamp'))
 
 class Order:
   def __init__(self, venue_id, symbol, side, price, qty,
@@ -268,15 +267,15 @@ class OrderManager:
     """Takes an order id to cancel, constructs a proto buf which can be sent
        to the order engine.
     """
-    cr = cancel_request()
-    cr.cl_order_id = cr_id
-    cr.orig_order_ order_id
-    cr.strategy_id = self.strategy_id
-    cr.symbol = order.symbol
-    cr.side = order.side
-    cr.order_qty = order.qty
-    return cr
-  
+    pb = order_cancel()
+    pb.cl_order_id = request_id
+    pb.orig_order_id = order.id
+    pb.strategy_id = self.strategy_id
+    pb.symbol = order.symbol
+    pb.side = order.side
+    pb.order_qty = order.qty
+    return pb
+    
   def _make_new_order_request(self, order):
     # send this probobuf back to order engine to actually place the order
     order_pb = new_order_single()
@@ -298,7 +297,7 @@ class OrderManager:
     pb.cl_order_id = request_id
     pb.strategy_id = self.strategy_id
     # hard-coded for baxter-- won't work with FAST or FXCM
-    pb.handl_inst = fix_constants.HANDLING_INSTRUCTION.AUTOMATED_INTERVENTION_OK
+    pb.handl_inst = HANDLING_INSTRUCTION.AUTOMATED_INTERVENTION_OK
     pb.symbol = order.symbol
     pb.side = order.side 
     pb.order_qty = order.qty 
@@ -309,9 +308,9 @@ class OrderManager:
     return pb 
     
     
-  def send_new_order(self, venue, symbol, side, price, size, order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY):
+  def send_new_order(self, venue, symbol, side, price, qty, order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY):
     print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
-      (venue, symbol, side, price, size)
+      (venue, symbol, side, price, qty)
     
     order_id = fresh_id()
     order = Order(venue, symbol, side, price, qty, id = order_id,

@@ -1,17 +1,15 @@
 from proto_objs import spot_fx_md_1_pb2
-import gevent 
 import zmq 
 import time 
 import collections
-from fix_constants import ORDER_STATUS, EXEC_TYPE
+import order_manager
 import order_engine_constants
-from enum import enum 
-
 
 
 STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
 
 Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'symbol', 'timestamp'))
+
 # a pair of entries for bid and offer
 class Cross:
   def __init__(self, bid, offer):
@@ -32,9 +30,7 @@ symbols_to_offers = {}
 # set of symbols whose data has been updated since the last time the function 
 # 'find_best_crossed_pair' ran 
 updated_symbols = set([])
-
 context = zmq.Context()
-
 current_cross = None
     
 def update_market_data(bbo):
@@ -101,12 +97,12 @@ def synchronize_market_data(market_data_socket, wait_time):
   while time.time() < start_time + wait_time:
     ready_sockets = dict(poller.poll(1000))
     if ready_sockets.get(market_data_socket) == zmq.POLLIN:
-      msg = market_data_socket.recv()
-      receive_market_data(msg)
+      update_market_data(market_data_socket.recv())
   print "Waited", wait_time, "seconds, entering main loop"
 
 def outgoing_logic(order_sockets, order_manager, new_order_delay = 0,  max_order_lifetime = 5):
   curr_time = time.time()
+  global current_cross 
   if current_cross is None:
     current_cross = find_best_crossed_pair()
 
@@ -115,12 +111,8 @@ def outgoing_logic(order_sockets, order_manager, new_order_delay = 0,  max_order
   if current_cross is not None:
     bid = current_cross.bid
     offer = current_cross.offer
-    assert bid.venue in order_sockets, "Venue %s has no order engine" % bid.venue
-    bid_socket = order_sockets[bid.venue]
-    assert offer.venue in order_sockets, "Venue %s has no order engine" % offer.venue
-    offer_socket = order_sockets[offer.venue]
     
-    if cross.send_time is None and (cross.start_time + new_order_delay >= curr_time):
+    if current_cross.send_time is None and (current_cross.start_time + new_order_delay >= curr_time):
       # send the damn thing 
       print "Sending orders for %s" % current_cross
       order_manager.send_new_order(bid.venue, bid.symbol, order_manager.BID, bid.price, bid.size)
@@ -128,7 +120,7 @@ def outgoing_logic(order_sockets, order_manager, new_order_delay = 0,  max_order
       current_cross.status_sent()
       
     # if we've already sent an order, check if it's expired
-    elif cross.send_time is not None:
+    elif current_cross.send_time is not None:
       expired = curr_time >= current_cross.send_time + max_order_lifetime 
       n_open = len(order_manager.live_order_ids)
       if n_open == 0:
@@ -145,12 +137,12 @@ def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_
   poller.register(market_data_socket, zmq.POLLIN)
   for order_socket in order_sockets:
     poller.register(order_socket, zmq.POLLIN)
-  order_manager = order_manager.OrderManager(STRATEGY_ID, order_sockets)
+  om = order_manager.OrderManager(STRATEGY_ID, order_sockets)
   
   while True:
     ready_sockets = poller.poll(1000)
     for (socket, state) in ready_sockets:
-      assert state = zmq.POLLIN
+      assert state == zmq.POLLIN
       if socket == market_data_socket:
         print "POLLIN: market data"
         msg = market_data_socket.recv()
@@ -161,14 +153,14 @@ def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_
         print "POLLIN: order engine"
         [tag, msg] = order_socket.recv_multipart()
         order_manager.received_message_from_order_engine(tag, msg)
-    outgoing_logic(order_manager, new_order_delay, max_order_lifetime)
+    outgoing_logic(om, new_order_delay, max_order_lifetime)
 
 
-def say_hello(order_socket):
+def say_hello(socket):
   socket.send_multipart([order_engine_constants.STRATEGY_HELO, STRATEGY_ID])
   ready_flags = socket.poll(3000)
   if zmq.POLLIN not in ready_flags:
-    raise RuntimeError("Didn't get response to HELO from " + str(order_socket))
+    raise RuntimeError("Didn't get response to HELO from " + str(socket))
   [tag, venue_id] = socket.recv_multipart()
   assert tag == order_engine_constants.STRATEGY_HELO_ACK
   return venue_id
@@ -196,12 +188,12 @@ def ping(socket, name = None):
   
 def connect_to_order_engine_controller(addr):
   order_control_socket = context.socket(zmq.REQ)
-  print "Connecting control socket to %s:%s" %  (venue_id, base_addr, port) 
-  order_control_socket.connect(control_addr)
+  print "Connecting control socket to %s" %  addr 
+  order_control_socket.connect(addr)
   ping(order_control_socket)
   return order_control_socket 
     
-def init(md_addrs, order_engine_addrs):
+def init(md_addrs, order_engine_addrs, symbols = None):
   md_socket = context.socket(zmq.SUB)
   for addr in args.md_addrs:
     print "Connecting to market data socket %s" % addr
@@ -227,7 +219,7 @@ def init(md_addrs, order_engine_addrs):
       raise RuntimeError("Malformed order engine address " + addr)
     
     order_socket, venue_id = connect_to_order_engine(addr)
-    order_control_socket = connect_to_order_engine_controller(addr)
+    order_control_socket = connect_to_order_engine_controller(control_addr)
     order_sockets[venue_id] = order_socket
     order_control_sockets[venue_id] = order_control_socket  
   return md_socket, order_sockets, order_control_sockets
@@ -236,7 +228,7 @@ def init(md_addrs, order_engine_addrs):
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--market-data', type=str, nargs='+' dest = 'md_addrs')
+parser.add_argument('--market-data', type=str, nargs='+',  dest = 'md_addrs')
 parser.add_argument('--order-engine', type=str, nargs='*', dest='order_engine_addrs')
 parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
 parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
@@ -248,8 +240,8 @@ parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_
 if __name__ == '__main__':
   args = parser.parse_args()
   md_socket, order_sockets, _ = init(args.md_addrs, args.order_engine_addrs)
-  synchronize_with_market(md_socket, args.startup_wait_time)
-  poll_loop(md_socket, order_sockets)
+  synchronize_market_data(md_socket, args.startup_wait_time)
+  main_loop(md_socket, order_sockets)
   
   
   
