@@ -117,8 +117,8 @@ snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface,
 	// create an order id for this order
 	order_id oid(true);
 	//char oidbuf[UUID_STRLEN + 1];
-	uuidbuf_t oidbuf;
 #ifdef LOG
+	uuidbuf_t oidbuf;
 	pan::log_DEBUG("CANCEL REPLACE: Creating order id: ", oid.c_str(oidbuf));
 #endif
 	ocr.set_cl_order_id(oid.uuid(), strategy_id.size());	
@@ -190,8 +190,8 @@ snd_ORDER_CANCEL(zmq::socket_t* order_interface,
 	// create an order id for this order
 	order_id oid(true);
 	//char oidbuf[UUID_STRLEN + 1];
-	uuidbuf_t oidbuf;
 #ifdef LOG
+	uuidbuf_t oidbuf;
 	pan::log_DEBUG("CANCEL: Creating order id: ", oid.c_str(oidbuf));
 #endif
 	oc.set_cl_order_id(oid.uuid(), strategy_id.size());	
@@ -265,8 +265,8 @@ snd_NEW_ORDER(zmq::socket_t* order_interface,
 	// create an order id for this order
 	order_id oid(true);
 	//char oidbuf[UUID_STRLEN + 1];
-	uuidbuf_t oidbuf;
 #ifdef LOG
+	uuidbuf_t oidbuf;
 	pan::log_DEBUG("Creating order id: ", oid.c_str(oidbuf));
 #endif
 	nos.set_order_id(oid.uuid(), strategy_id.size());	
