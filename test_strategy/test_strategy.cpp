@@ -301,15 +301,23 @@ bool
 receiveBBOMarketData(zmq::socket_t* sock)
 {
     capkproto::instrument_bbo instrument_bbo_protobuf;
-    zmq::message_t tickmsg;
+    zmq::message_t symbol_msg;
+    zmq::message_t tick_msg;
     assert(sock);
     bool rc;
 #ifdef LOG
     pan::log_DEBUG("receiveBBOMarketData()");
 #endif
-    rc = sock->recv(&tickmsg, ZMQ_NOBLOCK);
+    rc = sock->recv(&symbol_msg, ZMQ_NOBLOCK);
     assert(rc);
-    instrument_bbo_protobuf.ParseFromArray(tickmsg.data(), tickmsg.size());
+    rc = sock->recv(&tick_msg, ZMQ_NOBLOCK);
+    assert(rc);
+    instrument_bbo_protobuf.ParseFromArray(tick_msg.data(), tick_msg.size());
+#ifdef LOG
+    pan::log_DEBUG("dump raw:", pan::blob(tick_msg.data(), tick_msg.size()),
+            "[", pan::integer(tick_msg.size()), "]");
+    pan::log_DEBUG("dump prb:", instrument_bbo_protobuf.DebugString());
+#endif
     capk::MultiMarketBBO_t bbo_book;
 
     // TODO FIX THIS to be int id for mic rather than string	
@@ -508,7 +516,11 @@ main(int argc, char **argv)
         // start the polling loop
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("Polling pair sockets in app thread");
-            retOK = zmq::poll(pollItems, 2, -1);
+            //retOK = zmq::poll(pollItems, 2, -1);
+            retOK = zmq_poll(pollItems, 2, -1);
+            if (retOK == -1 && zmq_errno() == EINTR) {
+                pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
+            }
             // receive market data
             if (pollItems[0].revents && ZMQ_POLLIN) {
                 //pan::log_DEBUG("RECEIVING MARKET DATA");
@@ -543,7 +555,7 @@ main(int argc, char **argv)
              * check for it here, trap it, and move on.
              */
             ret = zmq_poll(pollItems, 2, -1);
-            if (ret == -1 and zmq_errno() == EINTR) {
+            if (ret == -1 && zmq_errno() == EINTR) {
                 pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
                 continue;
             }
