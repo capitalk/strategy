@@ -61,7 +61,7 @@ MarketDataMux::stop()
 int	
 MarketDataMux::run()
 {
-//	try {
+	try {
 		assert(_context != NULL);
 
 		_inproc = new zmq::socket_t(*_context, ZMQ_PAIR);
@@ -97,11 +97,17 @@ MarketDataMux::run()
 		int64_t more = 0;
 		size_t more_size = sizeof(more);
 		while (1 && _stopRequested == false) {
-			ret = zmq::poll(_poll_items, _mdArraySize + 1, -1);
-			if (ret < 0) {
-				pan::log_CRITICAL("zmq::poll returned errno: ", pan::integer(zmq_errno()));
-				return -1;
-			}		
+			//ret = zmq::poll(_poll_items, _mdArraySize + 1, -1);
+            /* N.B
+             * DO NOT USE THE C++ version of poll since this will throw
+             * an exception when the spurious EINTR is returned. Simply
+             * check for it here, trap it, and move on.
+             */
+            ret = zmq_poll(_poll_items, _mdArraySize + 1, -1);
+            if (ret == -1 and zmq_errno() == EINTR) {
+                pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
+                continue;
+            }
 			// outbound msgs routed to correct venue 
 			if (_poll_items[0].revents & ZMQ_POLLIN) {
 				_msgCount++;	
@@ -152,12 +158,15 @@ MarketDataMux::run()
 				}
 			}		
 		}
-/*
+
 	}
+    catch(zmq::error_t& e) {
+		pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what(), "(", pan::integer(e.num()), ")");
+    }
 	catch(std::exception& e) {
 		pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what());
 	}	
-*/
+
 
 	return 0;
 }

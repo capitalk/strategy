@@ -36,6 +36,8 @@
 #include "utils/types.h"
 #include "utils/venue_globals.h"
 
+#include "unistd.h"
+
 // namespace stuff
 using google::dense_hash_map;
 namespace po = boost::program_options;
@@ -54,9 +56,9 @@ zmq::context_t ctx(1);
 
 // Global sockets these are PAIRS and the only two endpoints into the strategy
 // order entry socket
-zmq::socket_t* pOEInterface;
+zmq::socket_t* pOEInterface = NULL;
 // market data socket
-zmq::socket_t* pMDInterface;
+zmq::socket_t* pMDInterface = NULL;
 
 // Hash tables and typedefs for storing order states
 //typedef dense_hash_map<order_id_t, capk::Order, std::tr1::hash<order_id>, eq_order_id> order_map_t;
@@ -68,10 +70,10 @@ extern order_map_t workingOrders;
 extern order_map_t completedOrders;	
 
 // Order multiplexer and its thread
-OrderMux* ptr_order_mux;
+OrderMux* ptr_order_mux = NULL;
 boost::thread* omux_thread = NULL;
 // Market data multiplexer and its thread
-MarketDataMux* ptr_market_data_mux;
+MarketDataMux* ptr_market_data_mux = NULL;
 boost::thread* mdmux_thread = NULL;
 
 // Signal handler setup for ZMQ
@@ -411,7 +413,6 @@ init()
   
  
     
-    
     ///////////////////////////////////////////////////////////////////////////
     // MARKET DATA INTERFACE SETUP
     ///////////////////////////////////////////////////////////////////////////
@@ -448,6 +449,7 @@ init()
         pan::log_CRITICAL("EXCEPTION: ", err.what(), " (", pan::integer(err.num()), ") - are market data and order interfaces up?");
         return -1;
     }
+
     return 0;
 
 }
@@ -479,7 +481,11 @@ main(int argc, char **argv)
         pan::log_NOTICE("Running interactive");
         runInteractive = true;
     }
-
+    
+    // init() basically does three things
+    // 1) test connections to order engines
+    // 2) let mux connect to all order engines
+    // 3) let mux connect to all market data venues 
     retOK = init();
     assert(retOK == 0);
     if (retOK != 0) {
@@ -491,14 +497,14 @@ main(int argc, char **argv)
         exit(-1);
     }
   
-    // setup items to poll - only two endpoint pair sockets 
-    zmq::pollitem_t pollItems[] = {
-        /* { socket, fd, events, revents} */
-        {*pMDInterface, NULL, ZMQ_POLLIN, 0},
-        {*pOEInterface, NULL, ZMQ_POLLIN, 0}
-    };
 
     if (runInteractive == false) {
+        // setup items to poll - only two endpoint pair sockets 
+        zmq::pollitem_t pollItems[] = {
+            /* { socket, fd, events, revents} */
+            {*pMDInterface, NULL, ZMQ_POLLIN, 0},
+            {*pOEInterface, NULL, ZMQ_POLLIN, 0}
+        };
         // start the polling loop
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("Polling pair sockets in app thread");
@@ -517,19 +523,31 @@ main(int argc, char **argv)
     else {
         // setup items to poll - only two endpoint pair sockets 
         // we don't get market data in the interactive scenario
+        int user_input = STDIN_FILENO;
         zmq::pollitem_t pollItems[] = {
             /* { socket, fd, events, revents} */
             {*pOEInterface, NULL, ZMQ_POLLIN, 0},
-            {NULL, 0, ZMQ_POLLIN, 0}
+            {NULL, user_input, ZMQ_POLLIN, 0}
         };
 
 
         // start the polling loop
         bool shouldPrompt = true;;
+        int ret = -1; 
         while (1 && s_interrupted != 1) {
             //pan::log_DEBUG("APP Polling pair sockets in app thread");
-            retOK = zmq::poll(pollItems, 2, -1);
-            // receive market data
+            //zmq::poll(pollItems, 2, -1);
+            /* N.B
+             * DO NOT USE THE C++ version of poll since this will throw
+             * an exception when the spurious EINTR is returned. Simply
+             * check for it here, trap it, and move on.
+             */
+            ret = zmq_poll(pollItems, 2, -1);
+            if (ret == -1 and zmq_errno() == EINTR) {
+                pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
+                continue;
+            }
+
             if (shouldPrompt) {
                 std::cout << "Enter action (n=new; c=cancel; r=replace; q=quit; l=list ): " << std::endl;
                 shouldPrompt = false;

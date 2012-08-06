@@ -80,7 +80,8 @@ PING(zmq::context_t* pzmq_ctx,
     };
     int ret = -1;
     while (1) {
-        ret = zmq::poll(poll_items, 1, poll_timeout_us);
+        //ret = zmq::poll(poll_items, 1, poll_timeout_us);
+        ret = zmq_poll(poll_items, 1, poll_timeout_us);
         if (ret == -1 || ret == 0) {
             return -1;
         }

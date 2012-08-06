@@ -14,7 +14,8 @@ UTILS=$(COLLECTORS)/utils
 PROTO=$(COLLECTORS)/proto
 
 
-INCLUDE=-I$(BOOST) -I/usr/local/include/ \
+INCLUDE=-I$(BOOST) \
+		-I/usr/local/include/ \
 		-I..\
 	   	-I$(COLLECTORS) \
 		-I $(PANTHEIOS_ROOT)/include \
@@ -23,8 +24,8 @@ INCLUDE=-I$(BOOST) -I/usr/local/include/ \
 		-I $(ORDER_ENGINES) \
 		-I $(STRATEGY_BASE)
 
-LIBS= -L/usr/local/src/quickfix/lib/ \
-		-L/usr/local/lib \
+		#-L/usr/local/lib 
+LIBS=	-L/tmp/zmq.debug/lib/ \
       	-lquickfix -lboost_date_time \
 		-lboost_program_options \
 		-lboost_filesystem \
@@ -46,7 +47,7 @@ PANTHEIOS_LIBS= -L $(PANTHEIOS_ROOT)/lib \
         -l pantheios.1.core.gcc44.file64bit 
 
 CFLAGS=-Wall -std=c++0x -pthread -O3 -ULOG -DNDEBUG
-LDFLAGS=-static
+#LDFLAGS=-static
 
 ifeq ($(dbg),1)
         CFLAGS = -Wall -std=c++0x -pthread -DDEBUG -ggdb  -DLOG -pg

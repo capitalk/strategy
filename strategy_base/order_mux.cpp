@@ -104,6 +104,8 @@ OrderMux::run()
 			_poll_items[i+1].events = ZMQ_POLLIN;
 			_poll_items[i+1].revents = 0;
 		}
+
+/*
         pan::log_DEBUG("Waiting for order interfaces...");
         int64_t  x;
         while (_oiArraySize < 1) {
@@ -113,6 +115,7 @@ OrderMux::run()
             timespec rem;
             nanosleep(&req, &rem);
         }
+*/
 /*
 	    if (_oiArraySize < 2) { // inproc socket is one
             pan::log_CRITICAL("NO ORDER INTERFACES INSTALLED [", 
@@ -129,11 +132,17 @@ OrderMux::run()
 		int64_t more = 0;
 		size_t more_size = sizeof(more);
 		while (1 && _stopRequested == false) {
-			ret = zmq::poll(_poll_items, _oiArraySize + 1, -1);
-			if (ret < 0) {
-				pan::log_CRITICAL("zmq::poll returned errno: ", pan::integer(zmq_errno()));
-				return -1;
-			}		
+			//ret = zmq::poll(_poll_items, _oiArraySize + 1, -1);
+            /* N.B
+             * DO NOT USE THE C++ version of poll since this will throw
+             * an exception when the spurious EINTR is returned. Simply
+             * check for it here, trap it, and move on.
+             */
+            ret = zmq_poll(_poll_items, _oiArraySize + 1, -1);
+            if (ret == -1 and zmq_errno() == EINTR) {
+                pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
+                continue;
+            }
 
 			// outbound orders routed to correct venue 
 			if (_poll_items[0].revents & ZMQ_POLLIN) {
