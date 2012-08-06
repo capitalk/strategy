@@ -92,18 +92,19 @@ handleExecutionReport(capkproto::execution_report& er)
     bool isNewItem;
     capk::Order order;
     order.set(const_cast<capkproto::execution_report&>(er));
-    //char oidbuf[UUID_STRLEN];
-    uuidbuf_t oidbuf;
 
     order_id_t oid = order.getOid();
-    oid.c_str(oidbuf);
+
 #ifdef LOG
+    uuidbuf_t oidbuf;
+    oid.c_str(oidbuf);
     pan::log_DEBUG("APP Execution report received CLOID: ", oidbuf);
 #endif
 
     order_id_t origOid = order.getOrigClOid();
-    origOid.c_str(oidbuf);
+
 #ifdef LOG
+    origOid.c_str(oidbuf);
     pan::log_DEBUG("APP Execution report received ORIGCLOID: ", oidbuf);
 #endif
 
@@ -374,7 +375,9 @@ handleOrderCancelReject(capkproto::order_cancel_reject& ocr)
     order_id_t oid;
     oid.set(ocr.orig_cl_order_id().c_str(), ocr.orig_cl_order_id().size());
 #ifdef LOG
-    pan::log_WARNING("OID: ", pan::blob(oid.get_uuid(), oid.size()), 
+    uuidbuf_t oidbuf;
+    oid.c_str(oidbuf);
+    pan::log_WARNING("OID: ", oidbuf, 
             " cancel rejected - full msg follows\n", 
             ocr.DebugString());
 #endif
