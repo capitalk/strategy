@@ -325,7 +325,7 @@ class OrderManager:
     order.add_pending_change(change)
     pb = self._make_new_order_request(order)
     socket = self.order_sockets[venue]
-    socket.send_multipart([order_engine_constants.ORDER_NEW, pb])
+    socket.send_multipart([chr(order_engine_constants.ORDER_NEW), pb])
   
   def send_cancel_replace(self, order_id, price, qty):
     print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
@@ -343,7 +343,7 @@ class OrderManager:
     
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
     socket = self.order_sockets[order.venue_id]
-    socket.send_multipart([order_engine_constants.ORDER_CANCEL_REPLACE, pb])
+    socket.send_multipart([chr(order_engine_constants.ORDER_CANCEL_REPLACE), pb])
     
     
   def send_cancel(self, order_id):
@@ -360,7 +360,7 @@ class OrderManager:
 
     pb = self._make_cancel_request(order_id)
     socket = self.order_sockets[order.venue_id]
-    socket.send_multipart([order_engine_constants.ORDER_CANCEL, pb])
+    socket.send_multipart([chr(order_engine_constants.ORDER_CANCEL), pb])
   
   def cancel_everything(self):
     for order_id in self.live_order_ids:

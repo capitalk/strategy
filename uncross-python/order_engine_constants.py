@@ -18,6 +18,9 @@ EXEC_RPT = 0xB0
 POSITION_REQ = 0xC0
 OPEN_ORDER_REQ = 0xC1
 
+PING = 0xF2
+PING_ACK = 0xF3
+
 names = { 
   ORDER_NEW : "ORDER_NEW",
   ORDER_CANCEL : "ORDER_CANCEL", 
@@ -38,6 +41,8 @@ names = {
 
   POSITION_REQ  : "POSITION_REQ", 
   OPEN_ORDER_REQ  : "OPEN_ORDER_REQ",
+  PING : "PING", 
+  PING_ACK : "PING_ACK"
 }
 
 def to_str(num):

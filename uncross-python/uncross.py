@@ -4,9 +4,9 @@ import time
 import collections
 import order_manager
 import order_engine_constants
+import uuid
 
-
-STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
+STRATEGY_ID = uuid.UUID('f1056929-073f-4c62-8b03-182d47e5e022').bytes
 
 Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'symbol', 'timestamp'))
 
@@ -22,7 +22,8 @@ class Cross:
   def status_sent(self):
     self.sent_time = time.time()
   
-    
+  def __str__(self):
+    return "Cross(bid = %s, offer = %s)" % (self.bid, self.offer)    
     
 symbols_to_bids = {} 
 # map each symbol (ie USD/JPY) to a dictionary from venue_id's to offer entries
@@ -33,17 +34,19 @@ updated_symbols = set([])
 context = zmq.Context()
 current_cross = None
     
-def update_market_data(bbo):
+def update_market_data(msg):
   timestamp = time.time()
-  print "Symbol", bbo.symbol
-  print "Venue", bbo.bid_venue_id
+  bbo = spot_fx_md_1_pb2.instrument_bbo();
+  bbo.ParseFromString(msg)
+  #print "Symbol", bbo.symbol
+  #print "Venue", bbo.bid_venue_id
   symbol, venue_id = bbo.symbol, bbo.bid_venue_id  
   new_bid = Entry(bbo.bid_price, bbo.bid_size, venue_id, bbo.symbol, timestamp)  
   new_offer = Entry(bbo.ask_price, bbo.ask_size, venue_id, bbo.symbol, timestamp)
   
   print "Bid", new_bid
   print "Offer", new_offer
-    
+  print   
   bids = symbols_to_bids.setdefault(symbol, {})
   old_bid = bids.get(venue_id)
   
@@ -62,11 +65,12 @@ def update_market_data(bbo):
 def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
   assert current_cross is None
   if len(updated_symbols) == 0: return
-  print "UPDATED SYMBOLS", updated_symbols
+  # print "UPDATED SYMBOLS", updated_symbols
   updated_symbols.clear()
   best_cross = None
   best_cross_magnitude = min_cross_magnitude
-  for (symbol, bid_venues) in symbols_to_bids.iteritems():
+  for symbol in updated_symbols:
+    bid_venuyes =  symbols_to_bids[symbol]
     yen_pair = "JPY" in symbol
     offer_venues = symbols_to_offers[symbol]
     # bids sorted from highest to lowest 
@@ -84,7 +88,10 @@ def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid = bid_entry, offer = offer_entry)
             best_cross_magnitude = cross_magnitude 
-            print "Found better cross: ", best_cross
+            print "-- Found better cross: ", best_cross
+  if best_cross is not None:
+    print "BEST CROSS:", best_cross 
+
   return best_cross
      
 
@@ -136,37 +143,63 @@ def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_
   poller = zmq.Poller()
   poller.register(market_data_socket, zmq.POLLIN)
   for order_socket in order_sockets:
-    poller.register(order_socket, zmq.POLLIN)
+    poller.register(order_socket, zmq.POLLIN | zmq.POLLOUT)
+  
   om = order_manager.OrderManager(STRATEGY_ID, order_sockets)
   
   while True:
-    ready_sockets = poller.poll(1000)
+    ready_sockets = poller.poll()
     for (socket, state) in ready_sockets:
-      assert state == zmq.POLLIN
-      if socket == market_data_socket:
-        print "POLLIN: market data"
-        msg = market_data_socket.recv()
-        bbo = spot_fx_md_1_pb2.instrument_bbo();
-        bbo.ParseFromString(msg)
-        update_market_data(bbo)
-      else:
-        print "POLLIN: order engine"
-        [tag, msg] = order_socket.recv_multipart()
-        order_manager.received_message_from_order_engine(tag, msg)
+      # ignore errors for now
+      if state == zmq.POLLERR:
+        print "POLLERR on socket", socket
+      elif state == zmq.POLLIN:
+        assert state == zmq.POLLIN, "Socket %s in unexpected state %s" % (socket, state) 
+        if socket == market_data_socket:
+          msg = market_data_socket.recv()
+          update_market_data(msg)
+        else:
+          [tag, msg] = order_socket.recv_multipart()
+          tag = int_from_bytes(tag) 
+          order_manager.received_message_from_order_engine(tag, msg)
     outgoing_logic(om, new_order_delay, max_order_lifetime)
 
+def poll_single_socket(socket, timeout= 1.0):
+  msg_parts = None
+  for i in range(10):
+   
+    time.sleep(timeout / 10.0)
+    try:
+      msg_parts = socket.recv_multipart(zmq.NOBLOCK)
+    except:
+      pass 
+    if msg_parts: return msg_parts
+    else:
+      print "Waiting for socket..."
+  return None
+
+
+hello_tag = chr( order_engine_constants.STRATEGY_HELO)
+
+import struct
+def int_from_bytes(bytes):
+  assert len(bytes) == 4
+  return struct.unpack('<I', bytes)[0]
 
 def say_hello(socket):
-  socket.send_multipart([order_engine_constants.STRATEGY_HELO, STRATEGY_ID])
-  ready_flags = socket.poll(3000)
-  if zmq.POLLIN not in ready_flags:
-    raise RuntimeError("Didn't get response to HELO from " + str(socket))
-  [tag, venue_id] = socket.recv_multipart()
-  assert tag == order_engine_constants.STRATEGY_HELO_ACK
-  return venue_id
+  socket.send_multipart([hello_tag, STRATEGY_ID])
+  message_parts = poll_single_socket(socket, 3)
+  if message_parts:
+    [tag, venue_id] = message_parts
+    tag = int_from_bytes(tag)
+    venue_id = int_from_bytes(venue_id)
+    assert tag == order_engine_constants.STRATEGY_HELO_ACK, "Unexpected response to HELO: %d" % tag 
+    return venue_id
+  else:
+    raise RuntimeError("Didn't get response to HELO from order engine")
 
 def connect_to_order_engine(addr):
-  order_socket = context.socket(zmq.DEALER)
+  order_socket = context.socket(zmq.XREQ) #zmq.DEALER)
   print "Connecting order engine socket to", addr
   order_socket.connect(addr)
   venue_id = say_hello(order_socket)
@@ -177,14 +210,15 @@ def connect_to_order_engine(addr):
 
 def ping(socket, name = None):
   t0 = time.time()
-  socket.send(order_engine_constants.PING)
-  ready_flags = socket.poll(3000)  
-  if zmq.POLLIN not in ready_flags:
+  socket.send(chr(order_engine_constants.PING))
+  message_parts = poll_single_socket(socket, 3)
+  if message_parts: 
+    tag = int_from_bytes(message_parts[0])
+    tag == order_engine_constants.PING_ACK
+    return time.time() - t0 
+  else:
     if not name: name = "<not given>"
     raise RuntimeError("Timed out waiting for ping ack from %s" % name)
-  else:
-    assert socket.recv() == order_engine_constants.PING_ACK
-  return time.time() - t0 
   
 def connect_to_order_engine_controller(addr):
   order_control_socket = context.socket(zmq.REQ)
@@ -210,7 +244,7 @@ def init(md_addrs, order_engine_addrs, symbols = None):
   for addr in args.order_engine_addrs:
     try: 
       parts = addr.split(":")
-      base_addr = "".join(parts[:-1])
+      base_addr = ":".join(parts[:-1])
       # assume the REP socket of an order engine connects at a port 2000 less 
       # than the DEALER socket
       port = int(parts[-1]) - 2000
@@ -223,8 +257,6 @@ def init(md_addrs, order_engine_addrs, symbols = None):
     order_sockets[venue_id] = order_socket
     order_control_sockets[venue_id] = order_control_socket  
   return md_socket, order_sockets, order_control_sockets
-  
-    
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
