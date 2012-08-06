@@ -19,13 +19,12 @@ class Cross:
     self.offer = offer
     self.start_time = time.time()
     self.send_time = None
-    self.bid_id = None
-    self.offer_id = None
+ 
   
-  def sent(self, bid_id, offer_id):
-    self.bid_id = bid_id
-    self.offer_id = offer_id
+  def status_sent(self):
     self.sent_time = time.time()
+  
+    
     
 symbols_to_bids = {} 
 # map each symbol (ie USD/JPY) to a dictionary from venue_id's to offer entries
@@ -93,11 +92,6 @@ def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
   return best_cross
      
 
-def say_hello(order_control_socket):
-  socket.send_multipart([order_engine_constants.STRATEGY_HELO, STRATEGY_ID])
-  [tag, venue_id] = socket.recv_multipart()
-  assert tag == order_engine_constants.STRATEGY_HELO_ACK
-  return venue_id
 
 def synchronize_market_data(market_data_socket, wait_time):
   print "Synchronizing market data"
@@ -111,111 +105,139 @@ def synchronize_market_data(market_data_socket, wait_time):
       receive_market_data(msg)
   print "Waited", wait_time, "seconds, entering main loop"
 
-def outgoing_logic(order_socket, order_manager, new_order_delay = 0,  max_order_lifetime = 5):
+def outgoing_logic(order_sockets, order_manager, new_order_delay = 0,  max_order_lifetime = 5):
   curr_time = time.time()
   if current_cross is None:
     current_cross = find_best_crossed_pair()
-    
-  # if we've identified a cross but haven't sent it yet 
-  # (and we're past the delay period) then send it to the order engine
+
+  # these if statements look repetitve but remember that find_best_crossed_pair
+  # might return None if there is no good cross
   if current_cross is not None:
     bid = current_cross.bid
     offer = current_cross.offer
+    assert bid.venue in order_sockets, "Venue %s has no order engine" % bid.venue
+    bid_socket = order_sockets[bid.venue]
+    assert offer.venue in order_sockets, "Venue %s has no order engine" % offer.venue
+    offer_socket = order_sockets[offer.venue]
     
     if cross.send_time is None and (cross.start_time + new_order_delay >= curr_time):
+      # send the damn thing 
       print "Sending orders for %s" % current_cross
-      bid_pb = order_manager.make_new_order(bid.venue, bid.symbol, order_manager.BID, bid.price, bid.size)
-      order_engine.send_multipart([order_engine_constants.ORDER_NEW, bid_pb])
-      offer_pb = order_manager.make_new_order(offer.venue, offer.symbol, order_manager.OFFER, offer.price, offer.size)
-      order_engine.send_multipart([order_engine_constants.ORDER_NEW, offer_pb])
-      current_cross.sent(bid_pb.cl_order_id, offer_pb.cl_order_id)
+      order_manager.send_new_order(bid.venue, bid.symbol, order_manager.BID, bid.price, bid.size)
+      order_manager.send_new_order(offer.venue, offer.symbol, order_manager.OFFER, offer.price, offer.size)
+      current_cross.status_sent()
       
     # if we've already sent an order, check if it's expired
-    elif current_cross.send_time is not None:
-      bid_still_alive = current_cross.bid_id in order_manager.live_order_ids
-      offer_still_alive = current_cross.offer_id in order_manager.live_order_ids
-      expired = current_cross.send_time + max_order_lifetime >= curr_time
-      if bid_still_alive and offer_still_alive and expired:
-        # if both orders still alive and expired, cancel them both
-      elif bid_still_alive and expired:
-        # bid is alive and expired, cancel/replace it to a shitty price
-        # to make sure we get a fill 
-      elif offer_still_alive and expired:
-        # offer is still alive and expired, cancel/replace it to a shitty 
-        # price to make sure we get a fill
-      else:
-        # both orders are gone! 
+    elif cross.send_time is not None:
+      expired = curr_time >= current_cross.send_time + max_order_lifetime 
+      n_open = len(order_manager.live_order_ids)
+      if n_open == 0:
         current_cross = None
+      elif n_open == 1 and expired:
+        order_manager.liquidate_immediately(order_manager.live_order_ids.pop())
+      elif n_open == 2 and expired:
+        order_manager.cancel_everything()
+      else:
+        raise RuntimeError("Didn't expect to have %d open orders simultaneously" % n_open)
         
-def main_loop(market_data_socket, order_socket, new_order_delay = 0, max_order_lifetime = 5):
+def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_lifetime = 5):
   poller = zmq.Poller()
   poller.register(market_data_socket, zmq.POLLIN)
-  poller.register(order_socket,  zmq.POLLIN|zmq.POLLOUT)
+  for order_socket in order_sockets:
+    poller.register(order_socket, zmq.POLLIN)
+  order_manager = order_manager.OrderManager(STRATEGY_ID, order_sockets)
+  
   while True:
-    ready_sockets = dict(poller.poll(1000))    
-    if ready_sockets.get(market_data_socket) == zmq.POLLIN:
-      print "POLLIN: market data"
-      msg = market_data_socket.recv()
-      bbo = spot_fx_md_1_pb2.instrument_bbo();
-      bbo.ParseFromString(msg)
-      update_market_data(bbo)
+    ready_sockets = poller.poll(1000)
+    for (socket, state) in ready_sockets:
+      assert state = zmq.POLLIN
+      if socket == market_data_socket:
+        print "POLLIN: market data"
+        msg = market_data_socket.recv()
+        bbo = spot_fx_md_1_pb2.instrument_bbo();
+        bbo.ParseFromString(msg)
+        update_market_data(bbo)
+      else:
+        print "POLLIN: order engine"
+        [tag, msg] = order_socket.recv_multipart()
+        order_manager.received_message_from_order_engine(tag, msg)
+    outgoing_logic(order_manager, new_order_delay, max_order_lifetime)
+
+
+def say_hello(order_socket):
+  socket.send_multipart([order_engine_constants.STRATEGY_HELO, STRATEGY_ID])
+  ready_flags = socket.poll(3000)
+  if zmq.POLLIN not in ready_flags:
+    raise RuntimeError("Didn't get response to HELO from " + str(order_socket))
+  [tag, venue_id] = socket.recv_multipart()
+  assert tag == order_engine_constants.STRATEGY_HELO_ACK
+  return venue_id
+
+def connect_to_order_engine(addr):
+  order_socket = context.socket(zmq.DEALER)
+  print "Connecting order engine socket to", addr
+  order_socket.connect(addr)
+  venue_id = say_hello(order_socket)
+  if not venue_id:
+    raise RuntimeError("Couldn't say HELO to order engine at " + addr)
+  print "...got venue_id =", venue_id
+  return order_socket, venue_id 
+
+def ping(socket, name = None):
+  t0 = time.time()
+  socket.send(order_engine_constants.PING)
+  ready_flags = socket.poll(3000)  
+  if zmq.POLLIN not in ready_flags:
+    if not name: name = "<not given>"
+    raise RuntimeError("Timed out waiting for ping ack from %s" % name)
+  else:
+    assert socket.recv() == order_engine_constants.PING_ACK
+  return time.time() - t0 
+  
+def connect_to_order_engine_controller(addr):
+  order_control_socket = context.socket(zmq.REQ)
+  print "Connecting control socket to %s:%s" %  (venue_id, base_addr, port) 
+  order_control_socket.connect(control_addr)
+  ping(order_control_socket)
+  return order_control_socket 
     
-    if ready_sockets.get(order_socket) == zmq.POLLIN:
-      print "POLLIN: order engine"
-      [tag, msg] = order_socket.recv_multipart()
-      order_manager.received_message_from_order_engine(tag, msg)
-      
-    elif ready_sockets.get(order_socket) == zmq.POLLOUT:
-      print "POLLOUT: order engine"
-      outgoing_logic(order_socket, order_manager, new_order_delay, max_order_lifetime)
-            
-          
-def init(args):
+def init(md_addrs, order_engine_addrs):
   md_socket = context.socket(zmq.SUB)
-  #for addr in args.md_addrs:
-  #   socket.connect(addr)
-  #  md_target = "%s:%s" % (args.md_addrs)
-  #  print "Making socket for", target
-  print "Connecting Market Data to %s" % args.md_addr
-  md_socket.connect(args.md_addr)
+  for addr in args.md_addrs:
+    print "Connecting to market data socket %s" % addr
+    md_socket.connect(addr)
   
   if symbols is None:
     print "Subscribing to all messages" 
-    socket.setsockopt(zmq.SUBSCRIBE, "")
+    md_socket.setsockopt(zmq.SUBSCRIBE, "")
   else:
     raise RuntimeError("Removed support for selective subscriptions!")
 
-  if args.order_engine_addr and args.order_engine_control_addr:
-    # the order socket is the one through which we send orders and
-    # receive execution reports 
-    order_socket = context.socket(zmq.DEALER)
-    print "Connecting Order Engine socket to", args.order_engine_addr
-    order_socket.connect(args.order_engine_addr)
+  order_sockets = {}
+  order_control_sockets = {}
+  for addr in args.order_engine_addrs:
+    try: 
+      parts = addr.split(":")
+      base_addr = "".join(parts[:-1])
+      # assume the REP socket of an order engine connects at a port 2000 less 
+      # than the DEALER socket
+      port = int(parts[-1]) - 2000
+      control_addr = "%s:%s"  % (base_addr, port)
+    except:
+      raise RuntimeError("Malformed order engine address " + addr)
     
-    order_control_socket = context.socket(zmq.REQ)
-    print "Connecting Order Engine Control socket to %s" % args.order_engine_control_addr
-    order_control_socket.connect(args.order_engine_control_addr)
-    
-    got_ack = say_hello(order_control_socket)
-    if not got_ack:
-      raise RuntimeError("Couldn't connect to order engine")
-  elif args.order_engine_addr or args.order_engine_control_addr:
-    print "Warning: If you give an order engine port you must also give an order engine control port"
-    order_socket = None
-    order_control_socket = None
-  else:
-    print "No order engine addresses given, only subscribing to market data"
-    order_socket = None
-    order_control_socket = None
-  return md_socket, order_socket, order_control_socket
+    order_socket, venue_id = connect_to_order_engine(addr)
+    order_control_socket = connect_to_order_engine_controller(addr)
+    order_sockets[venue_id] = order_socket
+    order_control_sockets[venue_id] = order_control_socket  
+  return md_socket, order_sockets, order_control_sockets
   
     
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--market-data', type=str, required=True, dest = 'md_addr')
-parser.add_argument('--order-engine', type=str, default= None, dest='order_engine_addr')
-parser.add_argument('--order-engine-control', type=str, default=None, dest='order_engine_control_addr')
+parser.add_argument('--market-data', type=str, nargs='+' dest = 'md_addrs')
+parser.add_argument('--order-engine', type=str, nargs='*', dest='order_engine_addrs')
 parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
 parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
   help='How many milliseconds should I delay orders by?')
@@ -223,12 +245,11 @@ parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_
   help="How many seconds to wait at startup until market data is synchronized")
 
   
-
 if __name__ == '__main__':
   args = parser.parse_args()
-  md_socket, order_socket, order_control_socket = init(args)
-  synchronize_with_market(market_data_socket, args.startup_wait_time)
-  poll_loop(market_data_socket, order_socket)
+  md_socket, order_sockets, _ = init(args.md_addrs, args.order_engine_addrs)
+  synchronize_with_market(md_socket, args.startup_wait_time)
+  poll_loop(md_socket, order_sockets)
   
   
   
