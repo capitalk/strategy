@@ -43,7 +43,7 @@ ClientOrderInterface::init()
 
 		catch (std::exception& e) {
 			pan::log_CRITICAL("EXCEPTION: ", __FILE__, pan::integer(__LINE__), " ", e.what());
-		}
+        }
 	}
 
 	_initComplete = true;
