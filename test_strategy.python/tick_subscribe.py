@@ -11,9 +11,9 @@ socket.connect("tcp://127.0.0.1:5273")
 # Use below for aggregated book
 #socket.connect("tcp://83.160.107.178:9000")
 
-#socket.setsockopt(zmq.SUBSCRIBE, "")
+socket.setsockopt(zmq.SUBSCRIBE, "")
 # Use below for direct market subscription
-socket.setsockopt(zmq.SUBSCRIBE, "EUR/USD")
+#socket.setsockopt(zmq.SUBSCRIBE, "EUR/USD")
 
 while True:
     # N.B. only aggregated book has topc and contents
