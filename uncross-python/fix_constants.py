@@ -12,7 +12,7 @@ EXEC_TRANS_TYPE = enum(
   CANCEL = '1',
   CORRECT = '2', 
   STATUS = '3'
-)
+).map(ord)
   
 """ Order status - FIX tag 39"""
 ORDER_STATUS = enum(
@@ -31,7 +31,7 @@ ORDER_STATUS = enum(
   EXPIRED  = 'C',
   RESTATED  = 'D',
   PENDING_REPLACE  = 'E',
-)
+).map(ord)
 
 """Execution Report Type, fix tag 150. 
   Often, but not always, the same as order status. 
@@ -53,7 +53,7 @@ EXEC_TYPE = enum(
   EXPIRED  = 'C',
   RESTATED  = 'D',
   PENDING_REPLACE  = 'E',
-)
+).map(ord)
 
 """Order Types - FIX tag 40"""
 ORDER_TYPE = enum(
@@ -76,7 +76,7 @@ ORDER_TYPE = enum(
   FOREX_PREVIOUSLY_QUOTED = 'H',
   FUNARI = 'I', # limit day order with executed portion handled as Market On Close e.g. Japan...
   PEGGED = 'P',
-)
+).map(ord)
 
 
 """Exec instruction - FIX tag 18"""
@@ -110,7 +110,7 @@ EXEC_INSTRUCTION = enum(
   CUSTOMER_DISPLAY_INSTRUCTION  = 'U',
   NETTING  = 'V',
   PEG_TO_VWAP  = 'W',
-)
+).map(ord)
 
 
 
@@ -131,7 +131,7 @@ HANDLING_INSTRUCTION = enum(
   AUTOMATED_NO_INTERVENTION = '1',
   AUTOMATED_INTERVENTION_OK = '2',
   MANUAL = '3', 
-)
+).map(ord)
   
 #  Time in Force - FIX tag 59"
 TIME_IN_FORCE = enum(
@@ -142,4 +142,4 @@ TIME_IN_FORCE = enum(
   FILL_OR_KILL = '4',
   GOOD_TIL_CROSSING = '5',
   GOOD_TIL_DATE = '6',
-)
+).map(ord)

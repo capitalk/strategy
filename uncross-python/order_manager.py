@@ -13,9 +13,9 @@ from proto_objs.order_cancel_reject_pb2 import order_cancel_reject
 from proto_objs.new_order_single_pb2 import new_order_single
 from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
 
-class Side:
-  BID = 1
-  OFFER = 2
+
+BID = 1
+OFFER = 2
 
 """
 There are lots of complicated state transitions in the lifetime of an order 
@@ -67,10 +67,10 @@ class Order:
     
     # fill this in when we get ack back from exchange
     self.status = None
-  
-  def add_pending_change(self, change):
-    self.pending_changes[change.request_id] = change
-    self.last_update_time = max(self.last_update_time, change.timestamp)
+ 
+  #def add_pending_change(self, change):
+  #  self.pending_changes[change.request_id] = change
+  #  self.last_update_time = max(self.last_update_time, change.timestamp)
    
   def set_status(self, new_status):
     self.status = new_status
@@ -317,15 +317,17 @@ class OrderManager:
     order = Order(venue, symbol, side, price, qty, id = order_id,
       order_type = order_type, time_in_force = time_in_force)
     self.orders[order_id] = order
-    self.live_order_ids.append(order_id)
+    self.live_order_ids.add(order_id)
 
     change = PendingChange(old_id = None, request_id = order_id, 
       status = ORDER_STATUS.NEW, price = price, qty = qty, 
       timestamp = time.time())
-    order.add_pending_change(change)
+    self.pending_changes[order_id] = change
     pb = self._make_new_order_request(order)
     socket = self.order_sockets[venue]
-    socket.send_multipart([chr(order_engine_constants.ORDER_NEW), pb])
+    tag = chr(order_engine_constants.ORDER_NEW)
+    bytes = pb.SerializeToString()
+    socket.send_multipart([tag, bytes])
   
   def send_cancel_replace(self, order_id, price, qty):
     print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
@@ -339,11 +341,13 @@ class OrderManager:
     change = \
       PendingChange(old_id = order_id, request_id = request_id,
         price = price, qty = qty, status = None, timestamp = time.time())
-    order.add_pending_change(change)
+    self.pending_changes[request_id] = change
     
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
     socket = self.order_sockets[order.venue_id]
-    socket.send_multipart([chr(order_engine_constants.ORDER_CANCEL_REPLACE), pb])
+    tag = chr(order_engine_constants.ORDER_CANCEL_REPLACE)
+    bytes = pb.SerializeToString()
+    socket.send_multipart([tag, bytes])
     
     
   def send_cancel(self, order_id):
@@ -356,11 +360,13 @@ class OrderManager:
     change = PendingChange(old_id=order_id, 
       request_id=request_id, status = ORDER_STATUS.CANCELLED, 
       price = None, qty = None, timestamp = time.time())
-    order.add_pending_change(change)
+    self.pending_changes[request_id] = change
 
     pb = self._make_cancel_request(order_id)
+    tag = chr(order_engine_constants.ORDER_CANCEL)
+    bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue_id]
-    socket.send_multipart([chr(order_engine_constants.ORDER_CANCEL), pb])
+    socket.send_multipart([tag, bytes])
   
   def cancel_everything(self):
     for order_id in self.live_order_ids:
@@ -374,7 +380,7 @@ class OrderManager:
     open_orders = self.open_orders()
     print "Attempting to liquidate all %d open orders" % len(open_orders)
     for order in open_orders:
-      if order.side == Side.BID:
+      if order.side == BID:
         best_offer = symbols_to_offers[order.symbol][order.venue_id]
         # submit a price 3 percent-pips worse than the best to improve our 
         # chances of a fill

@@ -2,11 +2,14 @@ from proto_objs import spot_fx_md_1_pb2
 import zmq 
 import time 
 import collections
-import order_manager
+from order_manager import BID, OFFER, OrderManager
 import order_engine_constants
 import uuid
+import sys 
 
-STRATEGY_ID = uuid.UUID('f1056929-073f-4c62-8b03-182d47e5e022').bytes
+STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
+
+STRATEGY_ID_BYTES = uuid.UUID(STRATEGY_ID).bytes 
 
 Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'symbol', 'timestamp'))
 
@@ -35,6 +38,9 @@ context = zmq.Context()
 current_cross = None
     
 def update_market_data(msg):
+  sys.stdout.write('.')
+  sys.stdout.flush()
+
   timestamp = time.time()
   bbo = spot_fx_md_1_pb2.instrument_bbo();
   bbo.ParseFromString(msg)
@@ -44,12 +50,11 @@ def update_market_data(msg):
   new_bid = Entry(bbo.bid_price, bbo.bid_size, venue_id, bbo.symbol, timestamp)  
   new_offer = Entry(bbo.ask_price, bbo.ask_size, venue_id, bbo.symbol, timestamp)
   
-  print "Bid", new_bid
-  print "Offer", new_offer
-  print   
+  # print "Bid", new_bid
+  # print "Offer", new_offer
+  # print   
   bids = symbols_to_bids.setdefault(symbol, {})
   old_bid = bids.get(venue_id)
-  
   if old_bid != new_bid:
     updated_symbols.add(symbol)
     bids[venue_id] = new_bid
@@ -62,16 +67,17 @@ def update_market_data(msg):
   
 
 
-def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
+def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
   assert current_cross is None
   if len(updated_symbols) == 0: return
   # print "UPDATED SYMBOLS", updated_symbols
-  updated_symbols.clear()
   best_cross = None
-  best_cross_magnitude = min_cross_magnitude
+  best_cross_magnitude = 0
   for symbol in updated_symbols:
-    bid_venuyes =  symbols_to_bids[symbol]
+     
+    bid_venues =  symbols_to_bids[symbol]
     yen_pair = "JPY" in symbol
+    
     offer_venues = symbols_to_offers[symbol]
     # bids sorted from highest to lowest 
     sorted_bids = sorted(bid_venues.items(), key=lambda (v,e): e.price, reverse=True)
@@ -79,19 +85,26 @@ def find_best_crossed_pair(max_size = 10000000, min_cross_magnitude = 50):
     sorted_offers = sorted(offer_venues.items(), key=lambda (v,e): e.price)
     for (bid_venue, bid_entry) in sorted_bids:
       for (offer_venue, offer_entry) in sorted_offers:
-        if bid_entry.price <= offer_entry.price: break
+        price_difference = bid_entry.price - offer_entry.price
+        if price_difference < 0: 
+          break
         else:
           cross_size = min(bid_entry.size, offer_entry.size)
-          price_difference = bid_entry.price - offer_entry.price
           cross_magnitude = price_difference * cross_size
+          print "--- ", symbol, cross_size, cross_magnitude
           if yen_pair: cross_magnitude /= 80
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid = bid_entry, offer = offer_entry)
             best_cross_magnitude = cross_magnitude 
+            print 
             print "-- Found better cross: ", best_cross
   if best_cross is not None:
+    print 
     print "BEST CROSS:", best_cross 
-
+    print 
+    if best_cross_magnitude < min_cross_magnitude: 
+      best_cross = None
+  updated_symbols.clear()
   return best_cross
      
 
@@ -107,67 +120,65 @@ def synchronize_market_data(market_data_socket, wait_time):
       update_market_data(market_data_socket.recv())
   print "Waited", wait_time, "seconds, entering main loop"
 
-def outgoing_logic(order_sockets, order_manager, new_order_delay = 0,  max_order_lifetime = 5):
+def outgoing_logic(om, min_cross_magnitude = 50, new_order_delay = 0,  max_order_lifetime = 5):
   curr_time = time.time()
   global current_cross 
+  
   if current_cross is None:
-    current_cross = find_best_crossed_pair()
-
+    current_cross = find_best_crossed_pair(min_cross_magnitude)
+  
   # these if statements look repetitve but remember that find_best_crossed_pair
   # might return None if there is no good cross
   if current_cross is not None:
+    sys.stdout.write('O')
+    sys.stdout.flush()
     bid = current_cross.bid
     offer = current_cross.offer
     
     if current_cross.send_time is None and (current_cross.start_time + new_order_delay >= curr_time):
       # send the damn thing 
       print "Sending orders for %s" % current_cross
-      order_manager.send_new_order(bid.venue, bid.symbol, order_manager.BID, bid.price, bid.size)
-      order_manager.send_new_order(offer.venue, offer.symbol, order_manager.OFFER, offer.price, offer.size)
+      om.send_new_order(bid.venue, bid.symbol, BID, bid.price, bid.size)
+      om.send_new_order(offer.venue, offer.symbol, OFFER, offer.price, offer.size)
       current_cross.status_sent()
       
     # if we've already sent an order, check if it's expired
     elif current_cross.send_time is not None:
       expired = curr_time >= current_cross.send_time + max_order_lifetime 
-      n_open = len(order_manager.live_order_ids)
+      n_open = len(om.live_order_ids)
       if n_open == 0:
         current_cross = None
       elif n_open == 1 and expired:
-        order_manager.liquidate_immediately(order_manager.live_order_ids.pop())
+        om.liquidate_immediately(om.live_order_ids.pop())
       elif n_open == 2 and expired:
-        order_manager.cancel_everything()
+        om.cancel_everything()
       else:
         raise RuntimeError("Didn't expect to have %d open orders simultaneously" % n_open)
         
-def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_lifetime = 5):
+def main_loop(market_data_socket, order_sockets, min_cross_magnitude = 50, new_order_delay = 0, max_order_lifetime = 5):
   poller = zmq.Poller()
   poller.register(market_data_socket, zmq.POLLIN)
-  for order_socket in order_sockets:
+  for order_socket in order_sockets.values():
     poller.register(order_socket, zmq.POLLIN)
   
-  om = order_manager.OrderManager(STRATEGY_ID, order_sockets)
-  iter = 0
-  n_iters = 10000
-  while iter < n_iters:
+  om = OrderManager(STRATEGY_ID_BYTES, order_sockets)
+  while True:
     ready_sockets = poller.poll()
     for (socket, state) in ready_sockets:
       # ignore errors for now
       if state == zmq.POLLERR:
-        print "POLLERR on socket", socket
-        msg = socket.recv()
+        print "POLLERR on socket", socket, "md socket = ", market_data_socket, "order sockets = ", order_sockets 
         print msg 
       elif state == zmq.POLLIN:
-        assert state == zmq.POLLIN, "Socket %s in unexpected state %s" % (socket, state) 
         if socket == market_data_socket:
           msg = market_data_socket.recv()
           update_market_data(msg)
         else:
-          [tag, msg] = order_socket.recv_multipart()
+          [tag, msg] = socket.recv_multipart()
           tag = int_from_bytes(tag) 
-          order_manager.received_message_from_order_engine(tag, msg)
-    outgoing_logic(om, new_order_delay, max_order_lifetime)
-  print "Ran", n_iters, "iterations, quitting..."
-  
+          om.received_message_from_order_engine(tag, msg)
+    outgoing_logic(om, min_cross_magnitude, new_order_delay, max_order_lifetime)
+
 def poll_single_socket(socket, timeout= 1.0):
   msg_parts = None
   for i in range(10):
@@ -191,7 +202,7 @@ def int_from_bytes(bytes):
   return struct.unpack('<I', bytes)[0]
 
 def say_hello(socket):
-  socket.send_multipart([hello_tag, STRATEGY_ID])
+  socket.send_multipart([hello_tag, STRATEGY_ID_BYTES])
   message_parts = poll_single_socket(socket, 3)
   if message_parts:
     [tag, venue_id] = message_parts
@@ -257,6 +268,8 @@ def init(md_addrs, order_engine_addrs, symbols = None):
       raise RuntimeError("Malformed order engine address " + addr)
     
     order_socket, venue_id = connect_to_order_engine(addr)
+    print "order socket", order_socket
+    print "venue id", venue_id 
     order_control_socket = connect_to_order_engine_controller(control_addr)
     order_sockets[venue_id] = order_socket
     order_control_sockets[venue_id] = order_control_socket  
@@ -271,15 +284,24 @@ parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay'
   help='How many milliseconds should I delay orders by?')
 parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_wait_time', 
   help="How many seconds to wait at startup until market data is synchronized")
+parser.add_argument('--min-cross-magnitude', type=float, default = 50, dest = 'min_cross_magnitude')
+parser.add_argument('--max-order-lifetime', type=float, default = 5.0, dest='max_order_lifetime')
+def cleanup(md_socket, order_sockets):
+  print "Running cleanup code" 
+  md_socket.setsockopt(zmq.LINGER, 0)
+  md_socket.close()
+  for socket in order_sockets.values():
+    socket.setsockopt(zmq.LINGER, 0)
+    socket.close()
 
-  
+import atexit  
 if __name__ == '__main__':
   args = parser.parse_args()
   assert len(args.md_addrs) > 0
   md_socket, order_sockets, _ = init(args.md_addrs, args.order_engine_addrs)
+  atexit.register(lambda: cleanup(md_socket, order_sockets))
   synchronize_market_data(md_socket, args.startup_wait_time)
-  main_loop(md_socket, order_sockets)
-  
+  main_loop(md_socket, order_sockets, args.min_cross_magnitude, args.order_delay, args.max_order_lifetime)
   
   
     
