@@ -7,7 +7,7 @@ socket = context.socket(zmq.SUB)
 
 # Use below for direct market subscription
 
-socket.connect("tcp://127.0.0.1:5273")
+socket.connect("tcp://127.0.0.1:5271")
 # Use below for aggregated book
 #socket.connect("tcp://83.160.107.178:9000")
 

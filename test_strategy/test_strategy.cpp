@@ -434,7 +434,7 @@ init()
                         MD_MUX);
     // TODO differentiate between bbo stream and depth
     ClientMarketDataInterface* ptr_agg_book_md_interface = 
-            new ClientMarketDataInterface(capk::kCAPK_AGGREGATED_BOOK, 
+            new ClientMarketDataInterface(capk::kCAPK_VENUE_ID, 
                                 &ctx,
                                 capk::kCAPK_AGGREGATED_BOOK_MD_INTERFACE_ADDR,
                                 MD_MUX);
