@@ -143,16 +143,19 @@ def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_
   poller = zmq.Poller()
   poller.register(market_data_socket, zmq.POLLIN)
   for order_socket in order_sockets:
-    poller.register(order_socket, zmq.POLLIN | zmq.POLLOUT)
+    poller.register(order_socket, zmq.POLLIN)
   
   om = order_manager.OrderManager(STRATEGY_ID, order_sockets)
-  
-  while True:
+  iter = 0
+  n_iters = 10000
+  while iter < n_iters:
     ready_sockets = poller.poll()
     for (socket, state) in ready_sockets:
       # ignore errors for now
       if state == zmq.POLLERR:
         print "POLLERR on socket", socket
+        msg = socket.recv()
+        print msg 
       elif state == zmq.POLLIN:
         assert state == zmq.POLLIN, "Socket %s in unexpected state %s" % (socket, state) 
         if socket == market_data_socket:
@@ -163,7 +166,8 @@ def main_loop(market_data_socket, order_sockets, new_order_delay = 0, max_order_
           tag = int_from_bytes(tag) 
           order_manager.received_message_from_order_engine(tag, msg)
     outgoing_logic(om, new_order_delay, max_order_lifetime)
-
+  print "Ran", n_iters, "iterations, quitting..."
+  
 def poll_single_socket(socket, timeout= 1.0):
   msg_parts = None
   for i in range(10):
