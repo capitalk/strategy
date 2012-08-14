@@ -1,4 +1,7 @@
 from proto_objs import spot_fx_md_1_pb2
+from proto_objs import venue_configuration_pb2
+
+
 import zmq 
 import time 
 import collections
@@ -168,7 +171,7 @@ def main_loop(market_data_socket, order_sockets, min_cross_magnitude = 50, new_o
       # ignore errors for now
       if state == zmq.POLLERR:
         print "POLLERR on socket", socket, "md socket = ", market_data_socket, "order sockets = ", order_sockets 
-        print msg 
+        #print msg 
       elif state == zmq.POLLIN:
         if socket == market_data_socket:
           msg = market_data_socket.recv()
@@ -242,43 +245,47 @@ def connect_to_order_engine_controller(addr):
   ping(order_control_socket)
   return order_control_socket 
     
-def init(md_addrs, order_engine_addrs, symbols = None):
-  md_socket = context.socket(zmq.SUB)
-  for addr in args.md_addrs:
-    print "Connecting to market data socket %s" % addr
-    md_socket.connect(addr)
+def init(config_server_addr, symbols = None):
   
-  if symbols is None:
-    print "Subscribing to all messages" 
-    md_socket.setsockopt(zmq.SUBSCRIBE, "")
-  else:
-    raise RuntimeError("Removed support for selective subscriptions!")
-
+  config_socket = context.socket(zmq.REQ)
+  config_socket.connect(config_server_addr)
+  print "Requesting configuation"
+  config_socket.send('C')
+  [tag, msg] = config_socket.recv_multipart()
+  assert tag == "CONFIG"
+  config = venue_configuration_pb2.configuration()
+  config.ParseFromString(msg)
+  
+  md_socket = context.socket(zmq.SUB)
   order_sockets = {}
   order_control_sockets = {}
-  for addr in args.order_engine_addrs:
-    try: 
-      parts = addr.split(":")
-      base_addr = ":".join(parts[:-1])
-      # assume the REP socket of an order engine connects at a port 2000 less 
-      # than the DEALER socket
-      port = int(parts[-1]) - 2000
-      control_addr = "%s:%s"  % (base_addr, port)
-    except:
-      raise RuntimeError("Malformed order engine address " + addr)
-    
-    order_socket, venue_id = connect_to_order_engine(addr)
-    print "order socket", order_socket
-    print "venue id", venue_id 
-    order_control_socket = connect_to_order_engine_controller(control_addr)
-    order_sockets[venue_id] = order_socket
-    order_control_sockets[venue_id] = order_control_socket  
-  return md_socket, order_sockets, order_control_sockets
+  mic_names = {}
+  for venue_config in config.configs:
+    venue_id = venue_config.venue_id
+    mic_name = venue_config.mic_name
+    print "Reading config for mic = %s, venue_id = %s" % (mic_name, venue_id)
+    order_control_socket = connect_to_order_engine_controller(venue_config.order_ping_addr)
+    if order_control_socket:
+      print "Ping succeeded, adding sockets..."
+      order_socket, venue_id2 = connect_to_order_engine(venue_config.order_interface_addr)
+      assert venue_id == venue_id2
+      order_sockets[venue_id] = order_socket
+      mic_names[venue_id] = mic_name
+      order_control_sockets[venue_id] = order_control_socket
+      md_socket.connect(venue_config.market_data_broadcast_addr)
+  if symbols is None:
+    md_socket.setsockopt(zmq.SUBSCRIBE, "")
+  else:
+    for s in symbols:
+       md_socket.setsockopt(zmq.SUBSCRIBE, s)
+  return md_socket, order_sockets, order_control_sockets, mic_names
+ 
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--market-data', type=str, nargs='*', default=[],  dest = 'md_addrs')
-parser.add_argument('--order-engine', type=str, nargs='*', default = [], dest='order_engine_addrs')
+parser.add_argument('--config-server', type='str', default='tcp://*:11111', dest='config_server')
+#parser.add_argument('--market-data', type=str, nargs='*', default=[],  dest = 'md_addrs')
+#parser.add_argument('--order-engine', type=str, nargs='*', default = [], dest='order_engine_addrs')
 parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
 parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
   help='How many milliseconds should I delay orders by?')
@@ -286,11 +293,10 @@ parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_
   help="How many seconds to wait at startup until market data is synchronized")
 parser.add_argument('--min-cross-magnitude', type=float, default = 50, dest = 'min_cross_magnitude')
 parser.add_argument('--max-order-lifetime', type=float, default = 5.0, dest='max_order_lifetime')
-def cleanup(md_socket, order_sockets):
+
+def cleanup(sockets):
   print "Running cleanup code" 
-  md_socket.setsockopt(zmq.LINGER, 0)
-  md_socket.close()
-  for socket in order_sockets.values():
+  for socket in sockets:
     socket.setsockopt(zmq.LINGER, 0)
     socket.close()
 
@@ -298,10 +304,10 @@ import atexit
 if __name__ == '__main__':
   args = parser.parse_args()
   assert len(args.md_addrs) > 0
-  md_socket, order_sockets, _ = init(args.md_addrs, args.order_engine_addrs)
-  atexit.register(lambda: cleanup(md_socket, order_sockets))
+  md_socket, order_sockets, order_control_sockets, _ = init(args.config_server)
+  all_sockets = [md_socket] + order_sockets.values() + order_control_sockets.values()
+  atexit.register(lambda: cleanup(all_sockets))
   synchronize_market_data(md_socket, args.startup_wait_time)
   main_loop(md_socket, order_sockets, args.min_cross_magnitude, args.order_delay, args.max_order_lifetime)
-  
   
     
