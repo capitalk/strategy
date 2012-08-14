@@ -235,7 +235,7 @@ def connect_to_order_engine(addr):
 def ping(socket, name = None):
   t0 = time.time()
   socket.send(chr(order_engine_constants.PING))
-  message_parts = poll_single_socket(socket, 3)
+  message_parts = poll_single_socket(socket, 1)
   if message_parts: 
     tag = int_from_bytes(message_parts[0])
     tag == order_engine_constants.PING_ACK
@@ -310,6 +310,10 @@ def init(config_server_addr, symbols = None):
   else:
     for s in symbols:
        md_socket.setsockopt(zmq.SUBSCRIBE, s)
+  print "--------------------------------------"
+  print "Active markets:",  ", ".join(mic_names.values())
+  print "--------------------------------------"
+  print 
   return md_socket, order_sockets, order_control_sockets, mic_names
  
 
