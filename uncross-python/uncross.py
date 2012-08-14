@@ -193,7 +193,13 @@ def poll_single_socket(socket, timeout= 1.0):
       pass 
     if msg_parts: return msg_parts
     else:
-      print "Waiting for socket..."
+      if i == 0:
+        sys.stdout.write('Waiting for socket...')
+        sys.stdout.flush()
+      else:
+        sys.stdout.write(".")
+        sys.stdout.flush()
+  print 
   return None
 
 
@@ -239,14 +245,32 @@ def ping(socket, name = None):
     raise RuntimeError("Timed out waiting for ping ack from %s" % name)
   
 def connect_to_order_engine_controller(addr):
-  order_control_socket = context.socket(zmq.REQ)
+  assert isinstance(addr, str) 
   print "Connecting control socket to %s" %  addr 
-  order_control_socket.connect(addr)
-  ping(order_control_socket)
-  return order_control_socket 
-    
+  order_control_socket = context.socket(zmq.REQ)
+  try:
+    order_control_socket.connect(addr)
+    #order_control_socket.connect('tcp://127.0.0.1:7998')
+    ping(order_control_socket)
+    return order_control_socket 
+  except:
+    print "Failed to ping", addr
+    print 
+    return  None
+
+def address_ok(addr):
+  if not isinstance(addr, str):
+    print "%s must be a string, not %s " % (addr,  type(addr))
+    return False
+  if len(addr) <= 3:
+    print "%s too short" % addr
+    return False
+  if addr[:3] not in ['tcp', 'ipc']:
+    print "Unknown protocol: %s" % addr[:3]
+    return False
+  return True 
+ 
 def init(config_server_addr, symbols = None):
-  
   config_socket = context.socket(zmq.REQ)
   config_socket.connect(config_server_addr)
   print "Requesting configuation"
@@ -261,18 +285,26 @@ def init(config_server_addr, symbols = None):
   order_control_sockets = {}
   mic_names = {}
   for venue_config in config.configs:
-    venue_id = venue_config.venue_id
-    mic_name = venue_config.mic_name
+    # convert everything to str manually since zmq hates unicode
+    venue_id = int(venue_config.venue_id)
+    mic_name = str(venue_config.mic_name)
+    ping_addr = str(venue_config.order_ping_addr)
+    order_addr = str(venue_config.order_interface_addr)
+    md_addr = str(venue_config.market_data_broadcast_addr)
     print "Reading config for mic = %s, venue_id = %s" % (mic_name, venue_id)
-    order_control_socket = connect_to_order_engine_controller(venue_config.order_ping_addr)
-    if order_control_socket:
-      print "Ping succeeded, adding sockets..."
-      order_socket, venue_id2 = connect_to_order_engine(venue_config.order_interface_addr)
-      assert venue_id == venue_id2
-      order_sockets[venue_id] = order_socket
-      mic_names[venue_id] = mic_name
-      order_control_sockets[venue_id] = order_control_socket
-      md_socket.connect(venue_config.market_data_broadcast_addr)
+    if address_ok(ping_addr) and address_ok(order_addr) and address_ok(md_addr): 
+      order_control_socket = connect_to_order_engine_controller(ping_addr)
+      if order_control_socket:
+        print "Ping succeeded, adding sockets..."
+        order_socket, venue_id2 = connect_to_order_engine (order_addr)
+        assert venue_id == venue_id2, "%s != %s (types %s, %s)" % \
+          (venue_id, venue_id2, type(venue_id), type(venue_id2))
+        order_sockets[venue_id] = order_socket
+        mic_names[venue_id] = mic_name
+        order_control_sockets[venue_id] = order_control_socket
+        md_socket.connect(md_addr)
+        print "Succeeded in connecting to %s" % mic_name
+        print 
   if symbols is None:
     md_socket.setsockopt(zmq.SUBSCRIBE, "")
   else:
@@ -283,7 +315,7 @@ def init(config_server_addr, symbols = None):
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--config-server', type='str', default='tcp://*:11111', dest='config_server')
+parser.add_argument('--config-server', type=str, default='tcp://*:11111', dest='config_server')
 #parser.add_argument('--market-data', type=str, nargs='*', default=[],  dest = 'md_addrs')
 #parser.add_argument('--order-engine', type=str, nargs='*', default = [], dest='order_engine_addrs')
 parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
@@ -303,7 +335,7 @@ def cleanup(sockets):
 import atexit  
 if __name__ == '__main__':
   args = parser.parse_args()
-  assert len(args.md_addrs) > 0
+  #assert len(args.md_addrs) > 0
   md_socket, order_sockets, order_control_sockets, _ = init(args.config_server)
   all_sockets = [md_socket] + order_sockets.values() + order_control_sockets.values()
   atexit.register(lambda: cleanup(all_sockets))
