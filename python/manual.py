@@ -85,16 +85,36 @@ def ui_update(order_manager):
 
     x = action_window.getch()
 
-    if x in [ord('P'), ord('p')]:
-      print "NEW ORDER"
+    if x in [ord('N'), ord('n')]:
+      action_window.erase()
+      action_window.border(0)
+      action_window.addstr(2,3, "New")
+      action_window.addstr(4,5, "Venue:")
+      venue_str = action_window.getstr(4, 15).strip()
+      venue = int(venue_str)
+      action_window.addstr(6,5, "Symbol:")
+      symbol = action_window.getstr(6, 15).strip()
+      
+      action_window.addstr(8,5, "Side:")
+      side_str = action_window.getstr(8, 15).strip()
+      side = side_str in ['1', 'a', 'ask', 'A', 'o', 'offer', 'O']
+      
+      action_window.addstr(10,5, "Price:")
+      price_str = action_window.getstr(10, 15).strip()
+      price = float(price_str)
+      
+      action_window.addstr(12,5, "Size:")
+      size_str = action_window.get_str(12,15).strip()
+      size = int(size_str)
+      order_manager.send_new_order(venue, symbol, side, price, size)
+       
     elif x in [ord('C'), ord('c')]:
       action_window.erase()
       action_window.border(0)
       action_window.addstr(2,3, "Cancel")
       action_window.addstr(4,3, "Order ID:")
-      id_str = action_window.window.getstr(4, 13)
-      order_manager.send_cancel(order_id)
-      
+      id_str = action_window.getstr(4, 13).strip()
+      order_manager.send_cancel(id_str)
     elif x in [ord('Q'), ord('q')]:
       curses.endwin()
       exit(0)

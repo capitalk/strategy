@@ -2,6 +2,7 @@ import uuid
 import time
 import datetime
 import order_engine_constants 
+from int_util import int_to_bytes, int_from_bytes 
 from fix_constants import ORDER_TYPE, TIME_IN_FORCE, HANDLING_INSTRUCTION
 from fix_constants import EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
 from collections import namedtuple
@@ -325,7 +326,7 @@ class OrderManager:
     self.pending_changes[order_id] = change
     pb = self._make_new_order_request(order)
     socket = self.order_sockets[venue]
-    tag = chr(order_engine_constants.ORDER_NEW)
+    tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, bytes])
   
@@ -345,7 +346,7 @@ class OrderManager:
     
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
     socket = self.order_sockets[order.venue_id]
-    tag = chr(order_engine_constants.ORDER_CANCEL_REPLACE)
+    tag = int_to_bytes(order_engine_constants.ORDER_CANCEL_REPLACE)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, bytes])
     
@@ -363,7 +364,7 @@ class OrderManager:
     self.pending_changes[request_id] = change
 
     pb = self._make_cancel_request(order_id)
-    tag = chr(order_engine_constants.ORDER_CANCEL)
+    tag = int_to_bytes(order_engine_constants.ORDER_CANCEL)
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue_id]
     socket.send_multipart([tag, bytes])
