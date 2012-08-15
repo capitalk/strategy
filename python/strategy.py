@@ -2,8 +2,7 @@ import uuid
 import zmq 
 import time
 
-
-from int_util import bytes_from_int, bytes_to_int 
+import sys
 
 from proto_objs import spot_fx_md_1_pb2
 from proto_objs import venue_configuration_pb2
@@ -61,7 +60,7 @@ def connect_to_order_engine(addr, strategy_id_bytes, mic_name):
 
 def ping(socket, name = None):
   t0 = time.time()
-  socket.send(bytes_from_int(order_engine_constants.PING))
+  socket.send(int_to_bytes(order_engine_constants.PING))
   message_parts = poll_single_socket(socket, 0.5)
   if message_parts: 
     tag = int_from_bytes(message_parts[0])
@@ -81,6 +80,17 @@ def connect_to_order_engine_controller(addr):
   except:
     print "Ping failed"
     return None
+
+def address_ok(addr):
+  type_ok = isinstance(addr, str)
+  try: 
+    prefix = addr[:3] 
+    prefix_ok = prefix in ['tcp', 'ipc']
+    port = addr.split(':')[-1]
+    port_ok = int(port) != 0
+    return prefix_ok and type_ok and port_ok
+  except:
+    return False
     
 class Strategy:
   def __init__(self, strategy_id, symbols = None):
@@ -117,32 +127,48 @@ class Strategy:
     config.ParseFromString(msg)
   
     for venue_config in config.configs:
-      venue_id = venue_config.venue_id
-      mic_name = venue_config.mic_name
+      venue_id = int(venue_config.venue_id)
+      mic_name = str(venue_config.mic_name)
+      print 
       print "Reading config for mic = %s, venue_id = %s" % (mic_name, venue_id)
-      order_control_socket = connect_to_order_engine_controller(venue_config.order_ping_addr)
+
+      ping_addr = str(venue_config.order_ping_addr)
+      order_addr = str(venue_config.order_interface_addr) 
+      md_addr = str(venue_config.market_data_broadcast_addr)
+      problem_with_addr = False
+      for addr in [ping_addr, order_addr, md_addr]:
+        if not address_ok(addr):
+          print "Malformed address", addr
+          problem_with_addr = True 
+      if problem_with_addr:
+          print "Skipping", mic_name 
+      order_control_socket = connect_to_order_engine_controller(ping_addr)
       if order_control_socket:
         print "Ping succeeded, adding sockets..."
         order_socket, venue_id2 = \
-          connect_to_order_engine(venue_config.order_interface_addr, self.strategy_id_bytes)
+          connect_to_order_engine(order_addr, self.strategy_id_bytes, mic_name)
         assert venue_id == venue_id2
         self.order_sockets[venue_id] = order_socket
         self.mic_names[venue_id] = mic_name
         self.order_control_sockets[venue_id] = order_control_socket
-        self.md_socket.connect(venue_config.market_data_broadcast_addr)
+        self.md_socket.connect(md_addr)
     if self.symbols is None:
       self.md_socket.setsockopt(zmq.SUBSCRIBE, "")
     else:
       for s in self.symbols:
          self.md_socket.setsockopt(zmq.SUBSCRIBE, s)
-    print 
-    print "----------------------------"
-    print "Succeeded in connecting to: ", ", ".join(self.mic_names.values())
-    print "----------------------------" 
-    print 
+    names = self.mic_names.values()
+    if len(names) > 0:
+      print 
+      print "----------------------------"
+      print "Succeeded in connecting to: ", ", ".join(names)
+      print "----------------------------" 
+      print 
+    else:
+      raise RuntimeError("Couldn't find any active venues")
     # return the set of valid venue_ids
-    return self.mic_names.keys()
-  
+    return names 
+ 
   def close_all(self):
     print "Running cleanup code" 
     sockets = [self.md_socket] + self.order_sockets.values() +\
