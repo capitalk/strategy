@@ -20,7 +20,12 @@ def poll_single_socket(socket, timeout= 1.0):
       pass 
     if msg_parts: return msg_parts
     else:
-      print "Waiting for socket..."
+      if i == 0:
+        sys.stdout.write('Waiting for socket...')
+        sys.stdout.flush()
+      else:
+        sys.stdout.write('.')
+        sys.stdout.flush()
   return None
 
 
@@ -34,7 +39,7 @@ hello_tag = chr( order_engine_constants.STRATEGY_HELO)
 
 def say_hello(socket, strategy_id_bytes):
   socket.send_multipart([hello_tag, strategy_id_bytes])
-  message_parts = poll_single_socket(socket, 3)
+  message_parts = poll_single_socket(socket, 2)
   if message_parts:
     [tag, venue_id] = message_parts
     tag = int_from_bytes(tag)
@@ -58,7 +63,7 @@ def connect_to_order_engine(addr, strategy_id_bytes):
 def ping(socket, name = None):
   t0 = time.time()
   socket.send(chr(order_engine_constants.PING))
-  message_parts = poll_single_socket(socket, 3)
+  message_parts = poll_single_socket(socket, 1)
   if message_parts: 
     tag = int_from_bytes(message_parts[0])
     tag == order_engine_constants.PING_ACK
