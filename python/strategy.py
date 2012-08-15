@@ -29,7 +29,8 @@ def poll_single_socket(socket, timeout= 1.0):
   return None
 
 
-hello_tag = int_to_bytes(order_engine_constants.STRATEGY_HELO)
+#hello_tag = int_to_bytes(order_engine_constants.STRATEGY_HELO)
+hello_tag = chr(order_engine_constants.STRATEGY_HELO)
 
 def say_hello(socket, strategy_id_bytes, mic_name):
   socket.send_multipart([hello_tag, strategy_id_bytes])
