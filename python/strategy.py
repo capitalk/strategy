@@ -4,7 +4,7 @@ import time
 import sys
 from proto_objs import spot_fx_md_1_pb2
 from proto_objs import venue_configuration_pb2
-
+from int_util import int_to_bytes, int_from_bytes 
 from order_manager import OrderManager
 import order_engine_constants
 
@@ -29,13 +29,7 @@ def poll_single_socket(socket, timeout= 1.0):
   return None
 
 
-import struct
-def int_from_bytes(bytes):
-  assert len(bytes) == 4
-  return struct.unpack('<I', bytes)[0]
-
-
-hello_tag = chr( order_engine_constants.STRATEGY_HELO)
+hello_tag = int_to_bytes(order_engine_constants.STRATEGY_HELO)
 
 def say_hello(socket, strategy_id_bytes, mic_name):
   socket.send_multipart([hello_tag, strategy_id_bytes])
@@ -51,7 +45,7 @@ def say_hello(socket, strategy_id_bytes, mic_name):
     raise RuntimeError("Didn't get response to HELO from order engine " + mic_name)
 
 def connect_to_order_engine(addr, strategy_id_bytes, mic_name):
-  order_socket = context.socket(zmq.XREQ) #zmq.DEALER)
+  order_socket = context.socket(zmq.DEALER) #zmq.DEALER)
   print "Connecting order engine socket to", addr
   order_socket.connect(addr)
   venue_id = say_hello(order_socket, strategy_id_bytes, mic_name)
