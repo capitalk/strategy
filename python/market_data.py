@@ -18,7 +18,9 @@ class MarketData:
     timestamp = time.time()
 
     symbol, venue_id = bbo.symbol, bbo.bid_venue_id  
-    assert venue_id != 0
+    if venue_id == 0:
+      venue_id = 890778
+    #assert venue_id != 0
     new_bid = Entry(bbo.bid_price, bbo.bid_size, venue_id, bbo.symbol, timestamp)  
     new_offer = Entry(bbo.ask_price, bbo.ask_size, venue_id, bbo.symbol, timestamp)
   

@@ -3,8 +3,8 @@ import time
 import datetime
 import order_engine_constants 
 from int_util import int_to_bytes, int_from_bytes 
-from fix_constants import ORDER_TYPE, TIME_IN_FORCE, HANDLING_INSTRUCTION
-from fix_constants import EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
+from proto_objs.capk_globals_pb2 import BID, ASK, GTC, GFD, FOK, LIM, MKT 
+from fix_constants import HANDLING_INSTRUCTION, EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
 from collections import namedtuple
 
 import proto_objs
@@ -15,8 +15,6 @@ from proto_objs.new_order_single_pb2 import new_order_single
 from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
 
 
-BID = 1
-OFFER = 2
 
 """
 There are lots of complicated state transitions in the lifetime of an order 
@@ -33,14 +31,14 @@ so keep just one order object around but update its ID and properties.
 """
 
 def fresh_id():
-  return str(uuid.uuid4())
+  return uuid.uuid4().bytes
 
 PendingChange = namedtuple('PendingChange', \
   ('request_id', 'old_id', 'price', 'qty', 'status', 'timestamp'))
 
 class Order:
   def __init__(self, venue_id, symbol, side, price, qty,
-      order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY, 
+      order_type =  LIM, time_in_force = GFD,  
       id = None):
     
     curr_time = time.time()
@@ -195,7 +193,7 @@ class OrderManager:
     # there is only order_id and an undefined value in original_order_id
     
     if transaction_type == EXEC_TRANS_TYPE.NEW and \
-        exec_type in [EXEC_TYPE.NEW, EXEC_TYPE.CANCEL, EXEC_TYPE.REPLACE, EXEC_TYPE.REJECTED]:
+        exec_type in [EXEC_TYPE.NEW, EXEC_TYPE.CANCELLED, EXEC_TYPE.REPLACE, EXEC_TYPE.REJECTED]:
       if order_id in self.pending_changes:
         del self.pending_changes[order_id]
       else:
@@ -254,10 +252,10 @@ class OrderManager:
       print "Got unexepcted cancel rejection: %s" % cr
       
   def received_message_from_order_engine(self, tag, msg):
-    if tag == order_engine_constants.EXC_RPT:
+    if tag == order_engine_constants.EXEC_RPT:
       er = execution_report()
       er.ParseFromString(msg)
-      self._handle_execution_rport(er)
+      self._handle_execution_report(er)
     elif tag == order_engine_constants.ORDER_CANCEL_REJ:
       cr = order_cancel_reject()
       cr.ParseFromString(msg)
@@ -310,7 +308,7 @@ class OrderManager:
     return pb 
     
     
-  def send_new_order(self, venue, symbol, side, price, qty, order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY):
+  def send_new_order(self, venue, symbol, side, price, qty, order_type = LIM, time_in_force = GFD):
     print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
       (venue, symbol, side, price, qty)
     
@@ -328,8 +326,9 @@ class OrderManager:
     socket = self.order_sockets[venue]
     tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
-    socket.send_multipart([tag, bytes])
-  
+    socket.send_multipart([tag, self.strategy_id, order_id, bytes])
+    print "Sent"
+ 
   def send_cancel_replace(self, order_id, price, qty):
     print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
     assert order_id in self.orders
@@ -348,7 +347,7 @@ class OrderManager:
     socket = self.order_sockets[order.venue_id]
     tag = int_to_bytes(order_engine_constants.ORDER_CANCEL_REPLACE)
     bytes = pb.SerializeToString()
-    socket.send_multipart([tag, bytes])
+    socket.send_multipart([tag, self.strategy_id, request_id, bytes])
     
     
   def send_cancel(self, order_id):
@@ -367,7 +366,7 @@ class OrderManager:
     tag = int_to_bytes(order_engine_constants.ORDER_CANCEL)
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue_id]
-    socket.send_multipart([tag, bytes])
+    socket.send_multipart([tag, self.strategy_id, request_id, bytes])
   
   def cancel_everything(self):
     for order_id in self.live_order_ids:

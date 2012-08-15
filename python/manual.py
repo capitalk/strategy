@@ -23,10 +23,10 @@ def init_ui():
   global action_window 
   global md_window
   screen = curses.initscr()
-  order_window = curses.newwin(50, 70, 2, 132)
+  order_window = curses.newwin(40, 80, 42, 2)
   
   action_window = curses.newwin(40, 50, 2, 2)
-  md_window = curses.newwin(50, 80, 2, 52)
+  md_window = curses.newwin(40, 100, 2, 52)
   action_window.timeout(250)
 
 def print_market_data():
@@ -73,8 +73,8 @@ def print_live_orders(order_manager):
   
   for (i, order_id) in enumerate(order_manager.live_order_ids):
     order = order_manager.get_order(order_id)
-    msg = "id = %s, venue = %d, symbol = %s, side = %s, price = %s, size = %s" % \
-      (order.id, order.venue_id, order.symbol, order.side, order.price, order.qty)
+    msg = "id = ??, venue = %d, symbol = %s, side = %s, price = %s, size = %s" % \
+      (order.venue_id, order.symbol, order.side, order.price, order.qty)
     order_window.addstr(4 + i*2, 5, msg)  
   
 
@@ -91,23 +91,45 @@ def ui_update(order_manager):
       action_window.timeout(-1)
       action_window.border(0)
       action_window.addstr(2,3, "New")
-      action_window.addstr(4,5, "Venue:")
-      venue_str = action_window.getstr(4, 15).strip()
-      venue = int(venue_str)
-      action_window.addstr(6,5, "Symbol:")
-      symbol = action_window.getstr(6, 15).strip()
+      bids = md.collect_best_bids()
+      bid_symbols = bids.keys()
       
-      action_window.addstr(8,5, "Side:")
+      assert len(bid_symbols) > 0
+      default_symbol = bid_symbols[0]
+      default_venue = bids[default_symbol].venue
+      default_price = bids[default_symbol].price
+      default_size = bids[default_symbol].size 
+
+      action_window.addstr(4,5, "Venue [%s]:" % default_venue)
+      venue_str = action_window.getstr(4, 20).strip()
+      if len(venue_str) == 0:
+        venue = default_venue
+      else:
+        venue = int(venue_str)
+      action_window.addstr(6,5, "Symbol [%s]:" % default_symbol)
+      symbol = action_window.getstr(6, 20).strip()
+      if len(symbol) == 0: symbol = default_symbol 
+      
+      action_window.addstr(8,5, "Side [bid]:")
       side_str = action_window.getstr(8, 15).strip()
-      side = side_str in ['1', 'a', 'ask', 'A', 'o', 'offer', 'O']
+      if len(side_str) == 0:
+        side = 0
+      else:
+        side = side_str in ['1', 'a', 'ask', 'A', 'o', 'offer', 'O']
       
-      action_window.addstr(10,5, "Price:")
-      price_str = action_window.getstr(10, 15).strip()
-      price = float(price_str)
+      action_window.addstr(10,5, "Price [%s]:"% default_price)
+      price_str = action_window.getstr(10, 20).strip()
+      if len(price_str) == 0:
+        price = default_price
+      else:
+        price = float(price_str)
       
-      action_window.addstr(12,5, "Size:")
-      size_str = action_window.getstr(12,15).strip()
-      size = int(size_str)
+      action_window.addstr(12,5, "Size [%s]:" % default_size)
+      size_str = action_window.getstr(12,20).strip()
+      if len(size_str) == 0:
+        size = default_size
+      else:
+        size = int(size_str)
       order_manager.send_new_order(venue, symbol, side, price, size)
        
     elif x in [ord('C'), ord('c')]:

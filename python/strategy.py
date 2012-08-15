@@ -201,6 +201,7 @@ class Strategy:
     poller.register(md_socket, zmq.POLLIN)
     for order_socket in self.order_sockets.values():
       poller.register(order_socket, zmq.POLLIN)
+      #raise RuntimeError( str( (len(self.strategy_id_bytes), type(self.strategy_id_bytes))))
       om = OrderManager(self.strategy_id_bytes, self.order_sockets)
       while True:
         ready_sockets = poller.poll()
