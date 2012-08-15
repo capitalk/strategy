@@ -79,7 +79,7 @@ if __name__ == '__main__':
   strategy = Strategy(STRATEGY_ID)
   strategy.connect(args.config_server)
   
-  atexit.register(strategy.close_all)
+  #atexit.register(strategy.close_all)
   strategy.synchronize_market_data(md.update)
   screen = curses.initscr()
   strategy.main_loop(md.update, ui_update)
