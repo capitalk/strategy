@@ -142,6 +142,7 @@ class Strategy:
           problem_with_addr = True 
       if problem_with_addr:
           print "Skipping", mic_name 
+          continue
       order_control_socket = connect_to_order_engine_controller(ping_addr)
       if order_control_socket:
         print "Ping succeeded, adding sockets..."

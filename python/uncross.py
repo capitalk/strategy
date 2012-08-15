@@ -3,7 +3,7 @@ import time
 import sys 
 from market_data import MarketData 
 from strategy import Strategy 
-from order_manager import BID, OFFER 
+from proto_objs.capk_globals_pb2 import BID, ASK
 
 
 # a pair of entries for bid and offer
@@ -89,7 +89,7 @@ def outgoing_logic(om, min_cross_magnitude = 50, new_order_delay = 0,  max_order
       # send the damn thing 
       print "Sending orders for %s" % current_cross
       om.send_new_order(bid.venue, bid.symbol, BID, bid.price, bid.size)
-      om.send_new_order(offer.venue, offer.symbol, OFFER, offer.price, offer.size)
+      om.send_new_order(offer.venue, offer.symbol, ASK, offer.price, offer.size)
       current_cross.status_sent()
       
     # if we've already sent an order, check if it's expired
