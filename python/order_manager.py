@@ -166,6 +166,7 @@ class OrderManager:
   
   
   def _handle_execution_report(self, er):
+    #print er
     order_id = er.cl_order_id
     # only used for cancel and cancel/replace
     original_order_id = er.orig_cl_order_id 
@@ -228,14 +229,13 @@ class OrderManager:
     # etc...
     # So, we rename the orders above and then assume we can ignore original_order_id.
     # Eventually we should use the _update_order method to also track position. 
-    assert original_order_id not in self.orders
     assert order_id in self.orders
     self._update_order(order_id, price, qty, filled_qty, unfilled_qty, status)
   
     ################################################
     #     Is the order in a terminal state?        #
     ################################################
-    if status in [ORDER_STATUS.FILL, ORDER_STATUS.EXPIRE, ORDER_STATUS.CANCELLED, ORDER_STATUS.REJECTED ]:
+    if status in [ORDER_STATUS.FILL, ORDER_STATUS.EXPIRED, ORDER_STATUS.CANCELLED, ORDER_STATUS.REJECTED ]:
       if order_id in self.live_order_ids:
         self.live_order_ids.remove(order_id)
   
@@ -309,8 +309,8 @@ class OrderManager:
     
     
   def send_new_order(self, venue, symbol, side, price, qty, order_type = LIM, time_in_force = GFD):
-    print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
-      (venue, symbol, side, price, qty)
+    #print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
+    #  (venue, symbol, side, price, qty)
     
     order_id = fresh_id()
     order = Order(venue, symbol, side, price, qty, id = order_id,
@@ -327,10 +327,10 @@ class OrderManager:
     tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, order_id, bytes])
-    print "Sent"
+    #print "Sent"
  
   def send_cancel_replace(self, order_id, price, qty):
-    print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
+    #print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
     assert order_id in self.orders
     assert order_id in self.live_order_ids
     order = self.orders[order_id]
@@ -351,7 +351,7 @@ class OrderManager:
     
     
   def send_cancel(self, order_id):
-    print "Attempting to cancel order %s" % order_id
+    #print "Attempting to cancel order %s" % order_id
     
     assert order_id in self.orders, "Unknown order %s" % order_id
     assert order_id in self.live_order_ids, "Can't cancel dead order %s" % order_id
@@ -362,7 +362,7 @@ class OrderManager:
       price = None, qty = None, timestamp = time.time())
     self.pending_changes[request_id] = change
 
-    pb = self._make_cancel_request(order_id)
+    pb = self._make_cancel_request(request_id, order)
     tag = int_to_bytes(order_engine_constants.ORDER_CANCEL)
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue_id]
@@ -378,7 +378,7 @@ class OrderManager:
   def liquidate_immediately(self, symbols_to_bids, symbols_to_offers):
     """Takes two dicts, mapping symbol -> venue -> entry"""
     open_orders = self.open_orders()
-    print "Attempting to liquidate all %d open orders" % len(open_orders)
+    #print "Attempting to liquidate all %d open orders" % len(open_orders)
     for order in open_orders:
       if order.side == BID:
         best_offer = symbols_to_offers[order.symbol][order.venue_id]
