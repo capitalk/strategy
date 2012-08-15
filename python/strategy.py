@@ -76,9 +76,13 @@ def connect_to_order_engine_controller(addr):
   order_control_socket = context.socket(zmq.REQ)
   print "Connecting control socket to %s" %  addr 
   order_control_socket.connect(addr)
-  ping(order_control_socket)
-  return order_control_socket
-
+  try:
+    ping(order_control_socket)
+    return order_control_socket
+  except:
+    print "Ping failed"
+    return None
+    
 class Strategy:
   def __init__(self, strategy_id, symbols = None):
     self.strategy_id = uuid.UUID(strategy_id)
