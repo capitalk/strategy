@@ -1,7 +1,7 @@
 import uuid 
 import zmq 
 import time
-
+import sys
 from proto_objs import spot_fx_md_1_pb2
 from proto_objs import venue_configuration_pb2
 
@@ -37,9 +37,9 @@ def int_from_bytes(bytes):
 
 hello_tag = chr( order_engine_constants.STRATEGY_HELO)
 
-def say_hello(socket, strategy_id_bytes):
+def say_hello(socket, strategy_id_bytes, mic_name):
   socket.send_multipart([hello_tag, strategy_id_bytes])
-  message_parts = poll_single_socket(socket, 2)
+  message_parts = poll_single_socket(socket, 1.5)
   if message_parts:
     [tag, venue_id] = message_parts
     tag = int_from_bytes(tag)
@@ -48,22 +48,22 @@ def say_hello(socket, strategy_id_bytes):
       "Unexpected response to HELO: %d" % tag 
     return venue_id
   else:
-    raise RuntimeError("Didn't get response to HELO from order engine")
+    raise RuntimeError("Didn't get response to HELO from order engine " + mic_name)
 
-def connect_to_order_engine(addr, strategy_id_bytes):
+def connect_to_order_engine(addr, strategy_id_bytes, mic_name):
   order_socket = context.socket(zmq.XREQ) #zmq.DEALER)
   print "Connecting order engine socket to", addr
   order_socket.connect(addr)
-  venue_id = say_hello(order_socket, strategy_id_bytes)
+  venue_id = say_hello(order_socket, strategy_id_bytes, mic_name)
   if not venue_id:
-    raise RuntimeError("Couldn't say HELO to order engine at " + addr)
+    raise RuntimeError("Couldn't say HELO to order engine %s at %s" % (mic_name, addr))
   print "...got venue_id =", venue_id
   return order_socket, venue_id 
 
 def ping(socket, name = None):
   t0 = time.time()
   socket.send(chr(order_engine_constants.PING))
-  message_parts = poll_single_socket(socket, 1)
+  message_parts = poll_single_socket(socket, 0.5)
   if message_parts: 
     tag = int_from_bytes(message_parts[0])
     tag == order_engine_constants.PING_ACK
@@ -82,11 +82,22 @@ def connect_to_order_engine_controller(addr):
   except:
     print "Ping failed"
     return None
-    
+
+def address_ok(addr):
+  type_ok = isinstance(addr, str)
+  try: 
+    prefix = addr[:3] 
+    prefix_ok = prefix in ['tcp', 'ipc']
+    port = addr.split(':')[-1]
+    port_ok = int(port) != 0
+    return prefix_ok and type_ok and port_ok
+  except:
+    return False
+
 class Strategy:
   def __init__(self, strategy_id, symbols = None):
     self.strategy_id = uuid.UUID(strategy_id)
-    self.strategy_bytes = self.strategy_id.bytes
+    self.strategy_id_bytes = self.strategy_id.bytes
     # market data socket
     self.md_socket = context.socket(zmq.SUB)
     # map from venue_id to order socket
@@ -118,31 +129,47 @@ class Strategy:
     config.ParseFromString(msg)
   
     for venue_config in config.configs:
-      venue_id = venue_config.venue_id
-      mic_name = venue_config.mic_name
+      venue_id = int(venue_config.venue_id)
+      mic_name = str(venue_config.mic_name)
+      print 
       print "Reading config for mic = %s, venue_id = %s" % (mic_name, venue_id)
-      order_control_socket = connect_to_order_engine_controller(venue_config.order_ping_addr)
+
+      ping_addr = str(venue_config.order_ping_addr)
+      order_addr = str(venue_config.order_interface_addr) 
+      md_addr = str(venue_config.market_data_broadcast_addr)
+      problem_with_addr = False
+      for addr in [ping_addr, order_addr, md_addr]:
+        if not address_ok(addr):
+          print "Malformed address", addr
+          problem_with_addr = True 
+      if problem_with_addr:
+          print "Skipping", mic_name 
+      order_control_socket = connect_to_order_engine_controller(ping_addr)
       if order_control_socket:
         print "Ping succeeded, adding sockets..."
         order_socket, venue_id2 = \
-          connect_to_order_engine(venue_config.order_interface_addr, self.strategy_id_bytes)
+          connect_to_order_engine(order_addr, self.strategy_id_bytes, mic_name)
         assert venue_id == venue_id2
         self.order_sockets[venue_id] = order_socket
         self.mic_names[venue_id] = mic_name
         self.order_control_sockets[venue_id] = order_control_socket
-        self.md_socket.connect(venue_config.market_data_broadcast_addr)
+        self.md_socket.connect(md_addr)
     if self.symbols is None:
       self.md_socket.setsockopt(zmq.SUBSCRIBE, "")
     else:
       for s in self.symbols:
          self.md_socket.setsockopt(zmq.SUBSCRIBE, s)
-    print 
-    print "----------------------------"
-    print "Succeeded in connecting to: ", ", ".join(self.mic_names.values())
-    print "----------------------------" 
-    print 
+    names = self.mic_names.values()
+    if len(names) > 0:
+      print 
+      print "----------------------------"
+      print "Succeeded in connecting to: ", ", ".join(names)
+      print "----------------------------" 
+      print 
+    else:
+      raise RuntimeError("Couldn't find any active venues")
     # return the set of valid venue_ids
-    return self.mic_names.keys()
+    return names
   
   def close_all(self):
     print "Running cleanup code" 
@@ -167,7 +194,7 @@ class Strategy:
         bbo = spot_fx_md_1_pb2.instrument_bbo()
         msg = self.md_socket.recv()
         bbo.ParseFromString(msg)
-        md_update(msg)
+        md_update(bbo)
     print "Waited", wait_time, "seconds, entering main loop"
     
   def main_loop(self, md_update, place_orders):

@@ -3,7 +3,8 @@ from os import system
 import curses
 from market_data import MarketData, Entry
 from strategy import Strategy 
-
+import sys 
+import atexit 
 #def get_param(prompt_string):
 #     win2.clear()
 #     win2.border(0)
@@ -58,7 +59,7 @@ def ui_update(arg):
       print "NEW ORDER"
     elif x in [ord('C'), ord('c')]:
       print "CANCEL"
-    elif x in [ord('Q', ord('q'))]:
+    elif x in [ord('Q'), ord('q')]:
       curses.endwin()
       exit(0)
       
@@ -77,7 +78,9 @@ if __name__ == '__main__':
   md = MarketData()
   strategy = Strategy(STRATEGY_ID)
   strategy.connect(args.config_server)
+  
   atexit.register(strategy.close_all)
   strategy.synchronize_market_data(md.update)
-  uncrosser.main_loop(md.update, ui_update)
+  screen = curses.initscr()
+  strategy.main_loop(md.update, ui_update)
 
