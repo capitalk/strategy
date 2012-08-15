@@ -137,7 +137,7 @@ def outgoing_logic(om, min_cross_magnitude = 50, new_order_delay = 0,  max_order
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
-parser.add_argument('--config-server', type='str', default='tcp://*:11111', dest='config_server')
+parser.add_argument('--config-server', type=str, default='tcp://*:11111', dest='config_server')
 parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
 parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
   help='How many milliseconds should I delay orders by?')

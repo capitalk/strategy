@@ -100,8 +100,8 @@ class Strategy:
        all available order engines and market data feeds
     """
     config_socket = self.config_socket
+    print "Requesting configuation from", config_server_addr
     config_socket.connect(config_server_addr)
-    print "Requesting configuation"
     config_socket.send('C')
     [tag, msg] = config_socket.recv_multipart()
     assert tag == "CONFIG"
