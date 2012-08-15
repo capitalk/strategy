@@ -56,7 +56,7 @@ def connect_to_order_engine(addr, strategy_id_bytes, mic_name):
 
 def ping(socket, name = None):
   t0 = time.time()
-  socket.send(chr(order_engine_constants.PING))
+  socket.send(bytes_from_int(order_engine_constants.PING))
   message_parts = poll_single_socket(socket, 0.5)
   if message_parts: 
     tag = int_from_bytes(message_parts[0])
