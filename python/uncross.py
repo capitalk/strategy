@@ -1,12 +1,10 @@
 import time 
-import collections
 
 import sys 
+from market_data import MarketData 
 from strategy import Strategy 
 from order_manager import BID, OFFER 
-STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
 
-Entry = collections.namedtuple('Entry', ('price', 'size', 'venue', 'symbol', 'timestamp'))
 
 # a pair of entries for bid and offer
 class Cross:
@@ -15,45 +13,27 @@ class Cross:
     self.offer = offer
     self.start_time = time.time()
     self.send_time = None
- 
-  
+   
   def status_sent(self):
     self.sent_time = time.time()
   
   def __str__(self):
     return "Cross(bid = %s, offer = %s)" % (self.bid, self.offer)    
     
-symbols_to_bids = {} 
-# map each symbol (ie USD/JPY) to a dictionary from venue_id's to offer entries
-symbols_to_offers = {}
-# set of symbols whose data has been updated since the last time the function 
-# 'find_best_crossed_pair' ran 
+
+
+STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
+md = MarketData()
 updated_symbols = set([])
 current_cross = None
-    
+
 def md_update(bbo):
+  """Update market data and add any changed symbols to 'updated_symbols' set"""
   sys.stdout.write('.')
   sys.stdout.flush()
-
-  timestamp = time.time()
-
-  symbol, venue_id = bbo.symbol, bbo.bid_venue_id  
-  new_bid = Entry(bbo.bid_price, bbo.bid_size, venue_id, bbo.symbol, timestamp)  
-  new_offer = Entry(bbo.ask_price, bbo.ask_size, venue_id, bbo.symbol, timestamp)
-  
-  bids = symbols_to_bids.setdefault(symbol, {})
-  old_bid = bids.get(venue_id)
-  if old_bid != new_bid:
-    updated_symbols.add(symbol)
-    bids[venue_id] = new_bid
-    
-  offers = symbols_to_offers.setdefault(symbol, {})
-  old_offer = offers.get(venue_id)
-  if old_offer != new_offer:
-    updated_symbols.add(symbol)
-    offers[venue_id] = new_offer
-  
-
+  changed = md.update(bbo)
+  if changed:
+    updated_symbols.add(bbo.symbol)
 
 def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
   assert current_cross is None
@@ -63,14 +43,9 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
   best_cross_magnitude = 0
   for symbol in updated_symbols:
      
-    bid_venues =  symbols_to_bids[symbol]
     yen_pair = "JPY" in symbol
-    
-    offer_venues = symbols_to_offers[symbol]
-    # bids sorted from highest to lowest 
-    sorted_bids = sorted(bid_venues.items(), key=lambda (v,e): e.price, reverse=True)
-    # offers from lowest to highest
-    sorted_offers = sorted(offer_venues.items(), key=lambda (v,e): e.price)
+    sorted_bids = md.sorted_bids(symbol)
+    sorted_offers = md.sorted_offers(symbol)
     for (bid_venue, bid_entry) in sorted_bids:
       for (offer_venue, offer_entry) in sorted_offers:
         price_difference = bid_entry.price - offer_entry.price
@@ -95,9 +70,6 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
   updated_symbols.clear()
   return best_cross
      
-
-
-
 def outgoing_logic(om, min_cross_magnitude = 50, new_order_delay = 0,  max_order_lifetime = 5):
   curr_time = time.time()
   global current_cross 
@@ -154,7 +126,9 @@ if __name__ == '__main__':
   uncrosser.connect(args.config_server)
   atexit.register(uncrosser.close_all)
   uncrosser.synchronize_market_data(md_update, args.startup_wait_time)
+  
   def place_orders(order_manager):
     outgoing_logic(order_manager, args.min_cross_magnitude, args.order_delay, args.max_order_lifetime)
+    
   uncrosser.main_loop(md_update, place_orders)
   
