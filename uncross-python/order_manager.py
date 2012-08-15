@@ -1,12 +1,21 @@
 import uuid
-import time 
-from fix_constants import ORDER_TYPE, TIME_IN_FORCE
+import time
+import datetime
+import order_engine_constants 
+from fix_constants import ORDER_TYPE, TIME_IN_FORCE, HANDLING_INSTRUCTION
 from fix_constants import EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
 from collections import namedtuple
 
-class Side:
-  BID = 0
-  OFFER = 1
+import proto_objs
+from proto_objs.execution_report_pb2 import execution_report
+from proto_objs.order_cancel_pb2 import order_cancel
+from proto_objs.order_cancel_reject_pb2 import order_cancel_reject
+from proto_objs.new_order_single_pb2 import new_order_single
+from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
+
+
+BID = 1
+OFFER = 2
 
 """
 There are lots of complicated state transitions in the lifetime of an order 
@@ -15,24 +24,30 @@ but we can simplify our model considerably if we focus on three states:
      order.id in order_manager.live_orders and order.status is None
  - Active in the market: 
      order.id in order_manager.live_orders and order.status is not None
- - Dead: order.status in not None and
+ - Dead: order.status is not None and
     order.id in order_manager.dead_orders  
 Additionally, instead of treating each distinct order id as a distinct order
 we instead treat the chain of order ids as versions of the same order-- 
 so keep just one order object around but update its ID and properties. 
 """
 
-#PendingChange = namedtuple('PendingChange', ('id', 'field', 'old', 'new'))
+def fresh_id():
+  return str(uuid.uuid4())
+
+PendingChange = namedtuple('PendingChange', \
+  ('request_id', 'old_id', 'price', 'qty', 'status', 'timestamp'))
 
 class Order:
   def __init__(self, venue_id, symbol, side, price, qty,
       order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY, 
       id = None):
-      
-    self.last_update_time = time.time()
-
+    
+    curr_time = time.time()
+    self.creation_time = curr_time
+    self.last_update_time = curr_time
+    
     if id is None: 
-      self.id = str(uuid.uuid4())
+      self.id = fresh_id()
     else:
       self.id = id 
       
@@ -52,17 +67,29 @@ class Order:
     
     # fill this in when we get ack back from exchange
     self.status = None
+ 
+  #def add_pending_change(self, change):
+  #  self.pending_changes[change.request_id] = change
+  #  self.last_update_time = max(self.last_update_time, change.timestamp)
+   
+  def set_status(self, new_status):
+    self.status = new_status
+    self.last_update_time = time.time()
+         
 
-Fill = namedtuple('Fill', ('symbol', 'venue', 'price', 'qty'))
+#Fill = namedtuple('Fill', ('symbol', 'venue', 'price', 'qty'))
 
+   
 class OrderManager:
-  def __init__(self):
+  def __init__(self, strategy_id, order_sockets):
+    """order_sockets maps venue ids to zmq DEALER sockets"""
     self.orders = {}
     self.live_order_ids = set([])
-   
-    # map from exec_ids to fills 
-    #self.fills = {}    
-  
+    self.pending_changes = {}
+    # use the strategy id when constructing protobuffers
+    self.strategy_id = strategy_id
+    self.order_sockets = order_sockets
+    
     
   def get_order(self, order_id):
     if order_id in self.orders:
@@ -117,8 +144,7 @@ class OrderManager:
     # have to rename the live order first and then kill it once its ID is the 
     # same as that of the cancel request 
     order = self._rename(order_id, cancel_id)
-    order.status = ORDER_STATUS.CANCELLED
-    self.last_update_time = time.time()  
+    order.set_status(ORDER_STATUS.CANCELLED)
     
   def _update_order(self, id, price, qty, filled_qty, unfilled_qty, status):
     order = self.get_order(id)
@@ -140,7 +166,7 @@ class OrderManager:
       order.last_update_time = time.time() 
   
   
-  def handle_execution_report(self, er):
+  def _handle_execution_report(self, er):
     order_id = er.cl_order_id
     # only used for cancel and cancel/replace
     original_order_id = er.orig_cl_order_id 
@@ -166,13 +192,15 @@ class OrderManager:
     
     # It's possible to get unsolicited cancels and replaces, in which case
     # there is only order_id and an undefined value in original_order_id
-    # COMMENTED OUT SINCE WE DON'T YET HAVE self.pending_changes 
     
-    ##if exec_type in [EXEC_TYPE.CANCEL, EXEC_TYPE.REPLACE]:
-    ##  assert order_id in self.pending_changes, \
-    ##    "Got unsolicited %s (order_id = %s, original_order_id=%s)" % \
-    ##    (EXEC_TYPE.to_str(exec_type), order_id, original_order_id)
-    
+    if transaction_type == EXEC_TRANS_TYPE.NEW and \
+        exec_type in [EXEC_TYPE.NEW, EXEC_TYPE.CANCEL, EXEC_TYPE.REPLACE, EXEC_TYPE.REJECTED]:
+      if order_id in self.pending_changes:
+        del self.pending_changes[order_id]
+      else:
+        print "Warning: Got unexpected execution report for %s (id = %s, original id = %s)" % \
+          (EXEC_TYPE.to_str(exec_type), order_id, original_order_id)
+      
     
     ###################################################
     #    Catch exec_types which we don't support      #
@@ -186,7 +214,8 @@ class OrderManager:
     ###########################################################
     #      Rename replaced/canceled orders, kill rejected    #
     ##########################################################
-    if transaction_type == EXEC_TRANS_TYPE.NEW and exec_type in [EXEC_TYPE.REPLACE, EXEC_TYPE.CANCELLED]:
+    if transaction_type == EXEC_TRANS_TYPE.NEW and \
+        exec_type in [EXEC_TYPE.REPLACE, EXEC_TYPE.CANCELLED]:
       # for now we're not dealing with unsolicited cancels
       assert original_order_id in self.live_order_ids   
       self._rename(original_order_id, order_id)
@@ -207,7 +236,158 @@ class OrderManager:
     ################################################
     #     Is the order in a terminal state?        #
     ################################################
-    if status in [ORDER_STATUS.FILL, ORDER_STATUS.EXPIRE, ORDER_STATUS.CANCELLED ]:
+    if status in [ORDER_STATUS.FILL, ORDER_STATUS.EXPIRE, ORDER_STATUS.CANCELLED, ORDER_STATUS.REJECTED ]:
       if order_id in self.live_order_ids:
         self.live_order_ids.remove(order_id)
+  
+  
+  
+  def _handle_cancel_reject(self, cr):
+    order_id = cr.cl_order_id  
+    if order_id in self.pending_changes:
+      pending_change = self.pending_changes[order_id]
+      assert pending_change.old_id == cr.orig_cl_order_id
+      assert pending_change.request_id == order_id
+      del self.pending[cr.cl_order_id]
+    else:
+      print "Got unexepcted cancel rejection: %s" % cr
       
+  def received_message_from_order_engine(self, tag, msg):
+    if tag == order_engine_constants.EXC_RPT:
+      er = execution_report()
+      er.ParseFromString(msg)
+      self._handle_execution_rport(er)
+    elif tag == order_engine_constants.ORDER_CANCEL_REJ:
+      cr = order_cancel_reject()
+      cr.ParseFromString(msg)
+      self._handle_cancel_reject(cr)
+    else:
+      raise RuntimeError("Unsupported order engine message: %s" % order_engine_constants.to_str(tag))
+  
+  def _make_cancel_request(self, request_id, order):
+    """Takes an order id to cancel, constructs a proto buf which can be sent
+       to the order engine.
+    """
+    pb = order_cancel()
+    pb.cl_order_id = request_id
+    pb.orig_order_id = order.id
+    pb.strategy_id = self.strategy_id
+    pb.symbol = order.symbol
+    pb.side = order.side
+    pb.order_qty = order.qty
+    return pb
+    
+  def _make_new_order_request(self, order):
+    # send this probobuf back to order engine to actually place the order
+    order_pb = new_order_single()
+    order_pb.order_id = order.id
+    order_pb.strategy_id = self.strategy_id
+    order_pb.symbol = order.symbol
+    order_pb.side = order.side 
+    order_pb.order_qty = order.qty 
+    order_pb.ord_type = order.order_type
+    order_pb.price = order.price
+    order_pb.time_in_force = order.time_in_force
+    # order_pb.account = None
+    order_pb.venue_id = order.venue_id
+    return order_pb
+    
+  def _make_cancel_replace_request(self, request_id, order, price, qty):
+    pb = order_cancel_replace()
+    pb.orig_order_id = order.id
+    pb.cl_order_id = request_id
+    pb.strategy_id = self.strategy_id
+    # hard-coded for baxter-- won't work with FAST or FXCM
+    pb.handl_inst = HANDLING_INSTRUCTION.AUTOMATED_INTERVENTION_OK
+    pb.symbol = order.symbol
+    pb.side = order.side 
+    pb.order_qty = order.qty 
+    pb.price = order.price 
+    pb.transact_time = datetime.datetime.utcnow().strftime('%Y%M%D-%H:%M:%S')
+    pb.order_type = order.order_type
+    pb.time_in_force = order.time_in_force
+    return pb 
+    
+    
+  def send_new_order(self, venue, symbol, side, price, qty, order_type =  ORDER_TYPE.LIMIT, time_in_force = TIME_IN_FORCE.DAY):
+    print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
+      (venue, symbol, side, price, qty)
+    
+    order_id = fresh_id()
+    order = Order(venue, symbol, side, price, qty, id = order_id,
+      order_type = order_type, time_in_force = time_in_force)
+    self.orders[order_id] = order
+    self.live_order_ids.add(order_id)
+
+    change = PendingChange(old_id = None, request_id = order_id, 
+      status = ORDER_STATUS.NEW, price = price, qty = qty, 
+      timestamp = time.time())
+    self.pending_changes[order_id] = change
+    pb = self._make_new_order_request(order)
+    socket = self.order_sockets[venue]
+    tag = chr(order_engine_constants.ORDER_NEW)
+    bytes = pb.SerializeToString()
+    socket.send_multipart([tag, bytes])
+  
+  def send_cancel_replace(self, order_id, price, qty):
+    print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
+    assert order_id in self.orders
+    assert order_id in self.live_order_ids
+    order = self.orders[order_id]
+    assert order.price != price or order.qty != qty, \
+      "Trying to cancel/replace without changing anything for order %s" % order-id
+    
+    request_id = fresh_id()
+    change = \
+      PendingChange(old_id = order_id, request_id = request_id,
+        price = price, qty = qty, status = None, timestamp = time.time())
+    self.pending_changes[request_id] = change
+    
+    pb = self._make_cancel_replace_request(request_id, order, price, qty)
+    socket = self.order_sockets[order.venue_id]
+    tag = chr(order_engine_constants.ORDER_CANCEL_REPLACE)
+    bytes = pb.SerializeToString()
+    socket.send_multipart([tag, bytes])
+    
+    
+  def send_cancel(self, order_id):
+    print "Attempting to cancel order %s" % order_id
+    
+    assert order_id in self.orders, "Unknown order %s" % order_id
+    assert order_id in self.live_order_ids, "Can't cancel dead order %s" % order_id
+    order = self.orders[order_id]
+    request_id = fresh_id()
+    change = PendingChange(old_id=order_id, 
+      request_id=request_id, status = ORDER_STATUS.CANCELLED, 
+      price = None, qty = None, timestamp = time.time())
+    self.pending_changes[request_id] = change
+
+    pb = self._make_cancel_request(order_id)
+    tag = chr(order_engine_constants.ORDER_CANCEL)
+    bytes = pb.SerializeToString()
+    socket = self.order_sockets[order.venue_id]
+    socket.send_multipart([tag, bytes])
+  
+  def cancel_everything(self):
+    for order_id in self.live_order_ids:
+      self.send_cancel(order_id)
+    
+  def open_orders(self):
+    return [self.orders[order_id] for order_id in self.live_order_ids]
+    
+  def liquidate_immediately(self, symbols_to_bids, symbols_to_offers):
+    """Takes two dicts, mapping symbol -> venue -> entry"""
+    open_orders = self.open_orders()
+    print "Attempting to liquidate all %d open orders" % len(open_orders)
+    for order in open_orders:
+      if order.side == BID:
+        best_offer = symbols_to_offers[order.symbol][order.venue_id]
+        # submit a price 3 percent-pips worse than the best to improve our 
+        # chances of a fill
+        price = best_offer.price * 1.0003 
+        self.send_cancel_replace(order.id, price = price, qty = order.qty)
+      else:
+        best_bid = symbols_to_bids[order.symbol][order.venue_id]
+        price = best_bid.price * 0.9997 
+        self.send_cancel_replace(order.id, price = price, qty = order.qty)
+    

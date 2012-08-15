@@ -8,7 +8,15 @@ class enum:
     for (name, value) in variants.items():
       self.value_to_name[value] = name
       setattr(self, name, value)
-  
+ 
+  def map(self, fn):
+    other = enum()
+    for (i, name) in self.value_to_name.iteritems():
+      j = fn(i)
+      other.value_to_name[j] = name
+      setattr(other, name, j)
+    return other 
+        
   def to_str(self, value):
     if value in self.value_to_name:
       return self.value_to_name[value]
