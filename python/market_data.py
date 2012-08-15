@@ -15,7 +15,6 @@ class MarketData:
     # 'find_best_crossed_pair' ran 
     
   def update(self, bbo, print_dot = False):
-    
     timestamp = time.time()
 
     symbol, venue_id = bbo.symbol, bbo.bid_venue_id  

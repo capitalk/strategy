@@ -86,7 +86,7 @@ def connect_to_order_engine_controller(addr):
 class Strategy:
   def __init__(self, strategy_id, symbols = None):
     self.strategy_id = uuid.UUID(strategy_id)
-    self.strategy_bytes = self.strategy_id.bytes
+    self.strategy_id_bytes = self.strategy_id.bytes
     # market data socket
     self.md_socket = context.socket(zmq.SUB)
     # map from venue_id to order socket
@@ -167,7 +167,7 @@ class Strategy:
         bbo = spot_fx_md_1_pb2.instrument_bbo()
         msg = self.md_socket.recv()
         bbo.ParseFromString(msg)
-        md_update(msg)
+        md_update(bbo)
     print "Waited", wait_time, "seconds, entering main loop"
     
   def main_loop(self, md_update, place_orders):
