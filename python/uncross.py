@@ -46,8 +46,8 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
     yen_pair = "JPY" in symbol
     sorted_bids = md.sorted_bids(symbol)
     sorted_offers = md.sorted_offers(symbol)
-    for (bid_venue, bid_entry) in sorted_bids:
-      for (offer_venue, offer_entry) in sorted_offers:
+    for bid_entry in sorted_bids:
+      for offer_entry in sorted_offers:
         price_difference = bid_entry.price - offer_entry.price
         if price_difference < 0: 
           break

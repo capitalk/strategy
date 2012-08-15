@@ -36,7 +36,7 @@ hello_tag = int_to_bytes(order_engine_constants.STRATEGY_HELO)
 
 def say_hello(socket, strategy_id_bytes):
   socket.send_multipart([hello_tag, strategy_id_bytes])
-  message_parts = poll_single_socket(socket, 2)
+  message_parts = poll_single_socket(socket, 1)
   if message_parts:
     [tag, venue_id] = message_parts
     tag = int_from_bytes(tag)
@@ -61,7 +61,7 @@ def connect_to_order_engine(addr, strategy_id_bytes, mic_name):
 def ping(socket, name = None):
   t0 = time.time()
   socket.send(int_to_bytes(order_engine_constants.PING))
-  message_parts = poll_single_socket(socket, 0.5)
+  message_parts = poll_single_socket(socket, 0.25)
   if message_parts: 
     tag = int_from_bytes(message_parts[0])
     tag == order_engine_constants.PING_ACK
@@ -177,7 +177,7 @@ class Strategy:
         socket.setsockopt(zmq.LINGER, 0)
         socket.close()
         
-  def synchronize_market_data(self, md_update, wait_time = 1.0):
+  def synchronize_market_data(self, md_update, wait_time = 0.5):
     """For a short period only receive market data without taking any
        actions. Every time a new piece of market data arrives, 
        parse it and call 'md_update' with the parsed struct

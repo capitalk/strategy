@@ -18,6 +18,7 @@ class MarketData:
     timestamp = time.time()
 
     symbol, venue_id = bbo.symbol, bbo.bid_venue_id  
+    assert venue_id != 0
     new_bid = Entry(bbo.bid_price, bbo.bid_size, venue_id, bbo.symbol, timestamp)  
     new_offer = Entry(bbo.ask_price, bbo.ask_size, venue_id, bbo.symbol, timestamp)
   
@@ -37,13 +38,13 @@ class MarketData:
   
   def sorted_bids(self, symbol):
     bid_venues = self.symbols_to_bids.get(symbol, [])
-    return sorted(bid_venues.items(), key=lambda (v,e): e.price, reverse=True)
+    return sorted(bid_venues.values(), key=lambda e: e.price, reverse=True)
   
   def sorted_offers(self, symbol):
-    offer_venues = self.symbols_to_offer.get(symbol, [])
-    return sorted(offer_venues.items(), key=lambda (v,e): e.price)
+    offer_venues = self.symbols_to_offers.get(symbol, [])
+    return sorted(offer_venues.values(), key=lambda e: e.price)
   
-  def collect_best_best_bids(self):
+  def collect_best_bids(self):
     result = {}
     for sym in self.symbols_to_bids.keys():
       result[sym] = self.sorted_bids(sym)[0]

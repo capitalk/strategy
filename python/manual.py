@@ -23,13 +23,11 @@ def init_ui():
   global action_window 
   global md_window
   screen = curses.initscr()
-  order_window = curses.newwin(40, 70, 2, 122)
+  order_window = curses.newwin(50, 70, 2, 132)
   
   action_window = curses.newwin(40, 50, 2, 2)
-  md_window = curses.newwin(40, 70, 2, 52)
-  
-  for w in [order_window, action_window, md_window]:
-    w.timeout(500)
+  md_window = curses.newwin(50, 80, 2, 52)
+  action_window.timeout(250)
 
 def print_market_data():
   best_bids = md.collect_best_bids()
@@ -40,9 +38,11 @@ def print_market_data():
   syms = set(best_bids.keys()).union(set(best_offers.keys()))
   md_window.addstr(2, 3, "Order Book")
 
-  for (i, sym) in enumerate(syms):
+  for (i, sym) in enumerate(sorted(syms)):
     bid_entry = best_bids.get(sym)
     offer_entry = best_offers.get(sym)
+    #raise RuntimeError(str( bid_entry) + "/" + str( offer_entry))
+      
     if bid_entry:
       bid_str = "%d @ %s (%s)" % (bid_entry.size, bid_entry.price, bid_entry.venue)
     else:
@@ -51,12 +51,13 @@ def print_market_data():
       offer_str = "%d @ %s (%s)" % (offer_entry.size, offer_entry.price, offer_entry.venue)
     else:
       offer_str = "<none>"
-    md_window.addstr(4+i*2, 5, "%s : bid = %s, offer = %s" % (sym, bid_str, offer_str))
+    md_window.addstr(4+i, 5, "%s : bid = %s, offer = %s" % (sym, bid_str, offer_str))
   md_window.refresh()
  
 def print_action_menu():
   action_window.erase()
   action_window.border(0)
+  action_window.timeout(250)
   action_window.addstr(2,3,"Actions")
   
   action_window.addstr(4,5,"N - New order")
@@ -87,6 +88,7 @@ def ui_update(order_manager):
 
     if x in [ord('N'), ord('n')]:
       action_window.erase()
+      action_window.timeout(-1)
       action_window.border(0)
       action_window.addstr(2,3, "New")
       action_window.addstr(4,5, "Venue:")
@@ -104,12 +106,13 @@ def ui_update(order_manager):
       price = float(price_str)
       
       action_window.addstr(12,5, "Size:")
-      size_str = action_window.get_str(12,15).strip()
+      size_str = action_window.getstr(12,15).strip()
       size = int(size_str)
       order_manager.send_new_order(venue, symbol, side, price, size)
        
     elif x in [ord('C'), ord('c')]:
       action_window.erase()
+      action_window.timeout(-1)
       action_window.border(0)
       action_window.addstr(2,3, "Cancel")
       action_window.addstr(4,3, "Order ID:")
