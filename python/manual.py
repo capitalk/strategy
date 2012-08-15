@@ -5,21 +5,37 @@ from market_data import MarketData, Entry
 from strategy import Strategy 
 import sys 
 import atexit 
-#def get_param(prompt_string):
-#     win2.clear()
-#     win2.border(0)
-#     win2.addstr(2, 2, prompt_string)
-#     win2.refresh()
-#     input = win2.getstr(10, 10, 60)
-#     return input
 
 
-md_window = None
+STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e023'  
+strategy = Strategy(STRATEGY_ID)
+md = MarketData()
+
+screen = None
+order_window = None
 action_window = None
+md_window = None
 
-def print_market_data(best_bids, best_offers):
+
+def init_ui():
+  global screen 
+  global order_window
+  global action_window 
+  global md_window
+  screen = curses.initscr()
+  order_window = curses.newwin(40, 70, 2, 122)
+  
+  action_window = curses.newwin(40, 50, 2, 2)
   md_window = curses.newwin(40, 70, 2, 52)
-  md_window.clear()
+  
+  for w in [order_window, action_window, md_window]:
+    w.timeout(500)
+
+def print_market_data():
+  best_bids = md.collect_best_bids()
+  best_offers = md.collect_best_offers() 
+  
+  md_window.erase()
   md_window.border(0)
   syms = set(best_bids.keys()).union(set(best_offers.keys()))
   md_window.addstr(2, 3, "Order Book")
@@ -27,15 +43,19 @@ def print_market_data(best_bids, best_offers):
   for (i, sym) in enumerate(syms):
     bid_entry = best_bids.get(sym)
     offer_entry = best_offers.get(sym)
-    md_window.addstr(4+i*2, 5, "%s : bid = %d @ %s (%s), offer = %d @ %s (%s)" % \
-      (sym, bid_entry.size, bid_entry.price, bid_entry.venue, 
-            offer_entry.size, offer_entry.price, offer_entry.venue))
+    if bid_entry:
+      bid_str = "%d @ %s (%s)" % (bid_entry.size, bid_entry.price, bid_entry.venue)
+    else:
+      bid_str = "<none>"
+    if offer_entry:
+      offer_str = "%d @ %s (%s)" % (offer_entry.size, offer_entry.price, offer_entry.venue)
+    else:
+      offer_str = "<none>"
+    md_window.addstr(4+i*2, 5, "%s : bid = %s, offer = %s" % (sym, bid_str, offer_str))
   md_window.refresh()
-  return md_window
-
+ 
 def print_action_menu():
-  action_window = curses.newwin(40, 50, 2, 2)
-  action_window.clear()
+  action_window.erase()
   action_window.border(0)
   action_window.addstr(2,3,"Actions")
   
@@ -43,22 +63,38 @@ def print_action_menu():
   action_window.addstr(6,5,"C - Cancel order")
   action_window.addstr(8,5,"Q - Quit")
   action_window.refresh()
-  return action_window
+ 
+def print_live_orders(order_manager):
+  
+  order_window.erase()
+  order_window.border(0)
+  order_window.addstr(2, 3, "Live Orders")
+  
+  for (i, order_id) in enumerate(order_manager.live_order_ids):
+    order = order_manager.get_order(order_id)
+    msg = "id = %s, venue = %d, symbol = %s, side = %s, price = %s, size = %s" % \
+      (order.id, order.venue_id, order.symbol, order.side, order.price, order.qty)
+    order_window.addstr(4 + i*2, 5, msg)  
+  
 
-def ui_update(arg):
+def ui_update(order_manager):
   try:
-    best_bids = {'USD/JPY':Entry(price = 1.2, size = 10**6, symbol='USD/JPY', venue=1, timestamp=0)} #('price', 'size', 'venue', 'symbol', 'timestamp'))
-    best_offers = {'USD/JPY': Entry(price = 1.3, size = 0.5*10**6, symbol = 'USD/JPY', venue = 2, timestamp = 0)}
-    md_window = print_market_data(best_bids, best_offers)
-    order_window = None
-    action_window = print_action_menu()
-    action_window.timeout(10)
+    print_market_data()
+    print_live_orders(order_manager)
+    print_action_menu()
+
     x = action_window.getch()
 
     if x in [ord('P'), ord('p')]:
       print "NEW ORDER"
     elif x in [ord('C'), ord('c')]:
-      print "CANCEL"
+      action_window.erase()
+      action_window.border(0)
+      action_window.addstr(2,3, "Cancel")
+      action_window.addstr(4,3, "Order ID:")
+      id_str = action_window.window.getstr(4, 13)
+      order_manager.send_cancel(order_id)
+      
     elif x in [ord('Q'), ord('q')]:
       curses.endwin()
       exit(0)
@@ -67,20 +103,15 @@ def ui_update(arg):
     curses.endwin()
     raise 
 
-STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e023'  
-
-
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Manual order entry') 
 parser.add_argument('--config-server', type=str, default='tcp://*:11111', dest='config_server')
 if __name__ == '__main__':
   args = parser.parse_args()
-  md = MarketData()
-  strategy = Strategy(STRATEGY_ID)
   strategy.connect(args.config_server)
   
-  atexit.register(strategy.close_all)
+  #atexit.register(strategy.close_all)
   strategy.synchronize_market_data(md.update)
-  screen = curses.initscr()
+  init_ui()
   strategy.main_loop(md.update, ui_update)
 
