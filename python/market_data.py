@@ -70,7 +70,7 @@ class MarketData:
     return result 
     
   def bid_liquidation_price(self, symbol, venue = None):
-    best_offer = md.get_offer(symbol, venue) 
+    best_offer = self.get_offer(symbol, venue) 
     # submit a price 3 percent-pips worse than the best to improve our 
     # chances of a fill
     return best_offer.price * 1.0003 
