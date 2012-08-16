@@ -303,7 +303,7 @@ class OrderManager:
     pb.order_qty = order.qty 
     pb.price = order.price 
     pb.transact_time = datetime.datetime.utcnow().strftime('%Y%M%D-%H:%M:%S')
-    pb.order_type = order.order_type
+    pb.ord_type = order.order_type
     pb.time_in_force = order.time_in_force
     return pb 
     
@@ -345,7 +345,7 @@ class OrderManager:
     
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
     socket = self.order_sockets[order.venue_id]
-    tag = int_to_bytes(order_engine_constants.ORDER_CANCEL_REPLACE)
+    tag = int_to_bytes(order_engine_constants.ORDER_REPLACE)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
     
@@ -375,19 +375,22 @@ class OrderManager:
   def open_orders(self):
     return [self.orders[order_id] for order_id in self.live_order_ids]
     
-  def liquidate_immediately(self, symbols_to_bids, symbols_to_offers):
-    """Takes two dicts, mapping symbol -> venue -> entry"""
-    open_orders = self.open_orders()
+  def liquidate_immediately(self, md, order_id = None):
+    """Takes MarketData, mapping symbol -> venue -> entry"""
+    if order_id:
+      open_orders = [self.get_order(order_id)]
+    else:
+      open_orders = self.open_orders()
     #print "Attempting to liquidate all %d open orders" % len(open_orders)
     for order in open_orders:
       if order.side == BID:
-        best_offer = symbols_to_offers[order.symbol][order.venue_id]
+        best_offer = md.get_offer(order.symbol, order.venue_id) 
         # submit a price 3 percent-pips worse than the best to improve our 
         # chances of a fill
         price = best_offer.price * 1.0003 
         self.send_cancel_replace(order.id, price = price, qty = order.qty)
       else:
-        best_bid = symbols_to_bids[order.symbol][order.venue_id]
+        best_bid = md.get_bid(order.symbol, order.venue_id) 
         price = best_bid.price * 0.9997 
         self.send_cancel_replace(order.id, price = price, qty = order.qty)
     
