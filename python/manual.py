@@ -66,23 +66,36 @@ def print_action_menu():
   action_window.addstr(10,5,"Q - Quit")
   action_window.refresh()
  
+
+
+# keep our own dict of live_orders mapping their displayed numbers to
+# internal UUIDs 
+displayed_live_orders = {} 
 def print_live_orders(order_manager):
-    
+  displayed_live_orders.clear()
   order_window.erase()
   order_window.border(0)
   order_window.addstr(2, 3, "Live Orders")
   print len(order_manager.live_order_ids)
   for (i, order_id) in enumerate(order_manager.live_order_ids):
     order = order_manager.get_order(order_id)
-    msg = "id = ??, venue = %d, symbol = %s, side = %s, price = %s, size = %s" % \
-      (order.venue_id, order.symbol, order.side, order.price, order.qty)
+    displayed_id = i+1
+    msg = "%d) venue = %d, symbol = %s, side = %s, price = %s, size = %s" % \
+      (displayed_id, order.venue_id, order.symbol, order.side, order.price, order.qty)
+    displayed_live_orders[displayed_id] = order_id
     order_window.addstr(4 + i, 5, msg)  
   order_window.refresh()
 
-def new_order_dialog(order_manager):
+
+def dialog(fn, *args, **kwds):
   action_window.erase()
-  action_window.timeout(-1)
   action_window.border(0)
+  action_window.timeout(-1)
+  fn(*args, **kwds)
+  action_window.timeout(250)
+  
+@dialog
+def new_order_dialog(order_manager):
   action_window.addstr(2,3, "New")
   bids = md.collect_best_bids()
   bid_symbols = bids.keys()
@@ -123,7 +136,17 @@ def new_order_dialog(order_manager):
   else:
     size = int(size_str)
   order_manager.send_new_order(venue, symbol, side, price, size)
-       
+
+@dialog
+def cancel_dialog(order_manager):
+  action_window.addstr(2,3, "Cancel")
+  action_window.addstr(4,3, "Order num:")
+  num_str = action_window.getstr(4, 13).strip()
+  num = int(num_str)
+  assert num in displayed_live_orders
+  order_id = displayed_live_orders[num]
+  order_manager.send_cancel(order_id)
+
 
 def ui_update(order_manager):
   try:
@@ -140,14 +163,7 @@ def ui_update(order_manager):
     elif x == 'N':
       new_order_dialog(order_manager)
     elif x == 'C':
-      action_window.erase()
-      action_window.timeout(-1)
-      action_window.border(0)
-      action_window.addstr(2,3, "Cancel")
-      action_window.addstr(4,3, "Order num:")
-      id_str = action_window.getstr(4, 13).strip()
-      order_manager.send_cancel(id_str)
-      action_window.timeout(250)
+      cancel_dialog(order_manager)
     elif x =='Q':
       curses.endwin()
       exit(0)

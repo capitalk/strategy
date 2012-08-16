@@ -7,13 +7,12 @@ from proto_objs.capk_globals_pb2 import BID, ASK, GTC, GFD, FOK, LIM, MKT
 from fix_constants import HANDLING_INSTRUCTION, EXEC_TYPE, EXEC_TRANS_TYPE, ORDER_STATUS
 from collections import namedtuple
 
-import proto_objs
 from proto_objs.execution_report_pb2 import execution_report
 from proto_objs.order_cancel_pb2 import order_cancel
 from proto_objs.order_cancel_reject_pb2 import order_cancel_reject
 from proto_objs.new_order_single_pb2 import new_order_single
 from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
-
+import logging 
 
 
 """
@@ -66,25 +65,17 @@ class Order:
     
     # fill this in when we get ack back from exchange
     self.status = None
- 
-  #def add_pending_change(self, change):
-  #  self.pending_changes[change.request_id] = change
-  #  self.last_update_time = max(self.last_update_time, change.timestamp)
-   
+    
   def set_status(self, new_status):
     self.status = new_status
     self.last_update_time = time.time()
          
-
-#Fill = namedtuple('Fill', ('symbol', 'venue', 'price', 'qty'))
-
-   
 class OrderManager:
   def __init__(self, strategy_id, order_sockets):
     """order_sockets maps venue ids to zmq DEALER sockets"""
     self.orders = {}
     self.live_order_ids = set([])
-    self.pending_changes = {}
+    self.pending = {}
     # use the strategy id when constructing protobuffers
     self.strategy_id = strategy_id
     self.order_sockets = order_sockets
@@ -194,8 +185,8 @@ class OrderManager:
     
     if transaction_type == EXEC_TRANS_TYPE.NEW and \
         exec_type in [EXEC_TYPE.NEW, EXEC_TYPE.CANCELLED, EXEC_TYPE.REPLACE, EXEC_TYPE.REJECTED]:
-      if order_id in self.pending_changes:
-        del self.pending_changes[order_id]
+      if order_id in self.pending:
+        del self.pending[order_id]
       else:
         print "Warning: Got unexpected execution report for %s (id = %s, original id = %s)" % \
           (EXEC_TYPE.to_str(exec_type), order_id, original_order_id)
@@ -243,8 +234,8 @@ class OrderManager:
   
   def _handle_cancel_reject(self, cr):
     order_id = cr.cl_order_id  
-    if order_id in self.pending_changes:
-      pending_change = self.pending_changes[order_id]
+    if order_id in self.pending:
+      pending_change = self.pending[order_id]
       assert pending_change.old_id == cr.orig_cl_order_id
       assert pending_change.request_id == order_id
       del self.pending[cr.cl_order_id]
@@ -277,7 +268,6 @@ class OrderManager:
     return pb
     
   def _make_new_order_request(self, order):
-    # send this probobuf back to order engine to actually place the order
     order_pb = new_order_single()
     order_pb.order_id = order.id
     order_pb.strategy_id = self.strategy_id
@@ -321,12 +311,13 @@ class OrderManager:
     change = PendingChange(old_id = None, request_id = order_id, 
       status = ORDER_STATUS.NEW, price = price, qty = qty, 
       timestamp = time.time())
-    self.pending_changes[order_id] = change
+    self.pending[order_id] = change
     pb = self._make_new_order_request(order)
     socket = self.order_sockets[venue]
     tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, order_id, bytes])
+    logging.debug("Sent new order to %s: %s", venue, order)
     #print "Sent"
  
   def send_cancel_replace(self, order_id, price, qty):
@@ -341,13 +332,18 @@ class OrderManager:
     change = \
       PendingChange(old_id = order_id, request_id = request_id,
         price = price, qty = qty, status = None, timestamp = time.time())
-    self.pending_changes[request_id] = change
+    self.pending[request_id] = change
     
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
-    socket = self.order_sockets[order.venue_id]
+    venue_id = order.venue_id 
+    socket = self.order_sockets[venue_id]
     tag = int_to_bytes(order_engine_constants.ORDER_REPLACE)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
+
+    logging.debug(\
+     "Sent cancel/replace to %s: orig_id = %s, new_id = %s, price = %s, qty= %s",
+      venue_id, order_id, request_id, price, qty)
     
     
   def send_cancel(self, order_id):
@@ -360,13 +356,14 @@ class OrderManager:
     change = PendingChange(old_id=order_id, 
       request_id=request_id, status = ORDER_STATUS.CANCELLED, 
       price = None, qty = None, timestamp = time.time())
-    self.pending_changes[request_id] = change
+    self.pending[request_id] = change
 
     pb = self._make_cancel_request(request_id, order)
     tag = int_to_bytes(order_engine_constants.ORDER_CANCEL)
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue_id]
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
+    logging.debug("Sent cancel to %s: order_id = %s", order_id)
   
   def cancel_everything(self):
     for order_id in self.live_order_ids:
