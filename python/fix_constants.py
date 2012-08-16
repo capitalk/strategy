@@ -134,12 +134,12 @@ HANDLING_INSTRUCTION = enum(
 ).map(ord)
   
 #  Time in Force - FIX tag 59"
-TIME_IN_FORCE = enum(
-  DAY = '0',
-  GOOD_TIL_CANCEL =  '1',
-  AT_THE_OPENING = '2',
-  IMMEDIATE_OR_CANCEL = '3',
-  FILL_OR_KILL = '4',
-  GOOD_TIL_CROSSING = '5',
-  GOOD_TIL_DATE = '6',
-).map(ord)
+#TIME_IN_FORCE = enum(
+#  DAY = '0',
+#  GOOD_TIL_CANCEL =  '1',
+#  AT_THE_OPENING = '2',
+#  IMMEDIATE_OR_CANCEL = '3',
+#  FILL_OR_KILL = '4',
+#  GOOD_TIL_CROSSING = '5',
+#  GOOD_TIL_DATE = '6',
+#).map(ord)

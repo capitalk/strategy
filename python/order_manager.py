@@ -166,6 +166,7 @@ class OrderManager:
   
   
   def _handle_execution_report(self, er):
+    print er 
     order_id = er.cl_order_id
     # only used for cancel and cancel/replace
     original_order_id = er.orig_cl_order_id 
@@ -228,7 +229,7 @@ class OrderManager:
     # etc...
     # So, we rename the orders above and then assume we can ignore original_order_id.
     # Eventually we should use the _update_order method to also track position. 
-    assert original_order_id not in self.orders
+    #assert original_order_id not in self.orders
     assert order_id in self.orders
     self._update_order(order_id, price, qty, filled_qty, unfilled_qty, status)
   
