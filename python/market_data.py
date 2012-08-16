@@ -37,7 +37,13 @@ class MarketData:
       changed = True
       offers[venue_id] = new_offer
     return changed
-  
+ 
+  def get_bid(self, symbol, venue):
+    return self.symbols_to_bids[symbol][venue]
+
+  def get_offer(self, symbol, venue):
+    return self.symbols_to_offers[symbol][venue]
+ 
   def sorted_bids(self, symbol):
     bid_venues = self.symbols_to_bids.get(symbol, [])
     return sorted(bid_venues.values(), key=lambda e: e.price, reverse=True)

@@ -3,7 +3,7 @@ import time
 import sys 
 from market_data import MarketData 
 from strategy import Strategy 
-from order_manager import BID, OFFER 
+from proto_objs.capk_globals_pb2 import BID, ASK
 
 
 # a pair of entries for bid and offer
@@ -15,7 +15,7 @@ class Cross:
     self.send_time = None
    
   def status_sent(self):
-    self.sent_time = time.time()
+    self.send_time = time.time()
   
   def __str__(self):
     return "Cross(bid = %s, offer = %s)" % (self.bid, self.offer)    
@@ -59,8 +59,6 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid = bid_entry, offer = offer_entry)
             best_cross_magnitude = cross_magnitude 
-            print 
-            print "-- Found better cross: ", best_cross
   if best_cross is not None:
     print 
     print "BEST CROSS:", best_cross 
@@ -80,8 +78,6 @@ def outgoing_logic(om, min_cross_magnitude = 50, new_order_delay = 0,  max_order
   # these if statements look repetitve but remember that find_best_crossed_pair
   # might return None if there is no good cross
   if current_cross is not None:
-    sys.stdout.write('O')
-    sys.stdout.flush()
     bid = current_cross.bid
     offer = current_cross.offer
     
@@ -89,22 +85,23 @@ def outgoing_logic(om, min_cross_magnitude = 50, new_order_delay = 0,  max_order
       # send the damn thing 
       print "Sending orders for %s" % current_cross
       om.send_new_order(bid.venue, bid.symbol, BID, bid.price, bid.size)
-      om.send_new_order(offer.venue, offer.symbol, OFFER, offer.price, offer.size)
+      om.send_new_order(offer.venue, offer.symbol, ASK, offer.price, offer.size)
       current_cross.status_sent()
       
     # if we've already sent an order, check if it's expired
     elif current_cross.send_time is not None:
       expired = curr_time >= current_cross.send_time + max_order_lifetime 
       n_open = len(om.live_order_ids)
+      sys.stdout.write(str(n_open))
+      sys.stdout.flush()
       if n_open == 0:
         current_cross = None
       elif n_open == 1 and expired:
-        om.liquidate_immediately(om.live_order_ids.pop())
+        om.liquidate_immediately(md) 
       elif n_open == 2 and expired:
         om.cancel_everything()
-      else:
-        raise RuntimeError("Didn't expect to have %d open orders simultaneously" % n_open)
-
+      elif n_open > 2:
+        print "WARNING: Didn't expect to have %d open orders simultaneously" % n_open
 
 
 from argparse import ArgumentParser 
@@ -115,7 +112,7 @@ parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay'
   help='How many milliseconds should I delay orders by?')
 parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_wait_time', 
   help="How many seconds to wait at startup until market data is synchronized")
-parser.add_argument('--min-cross-magnitude', type=float, default = 50, dest = 'min_cross_magnitude')
+parser.add_argument('--min-cross-magnitude', type=float, default = 35, dest = 'min_cross_magnitude')
 parser.add_argument('--max-order-lifetime', type=float, default = 5.0, dest='max_order_lifetime')
 
 
