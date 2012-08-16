@@ -2,14 +2,15 @@
 from os import system
 import curses
 from market_data import MarketData, Entry
-from strategy import Strategy 
+from strategy_loop import Strategy 
 import sys 
 import atexit 
 
 
 STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e023'  
-strategy = Strategy(STRATEGY_ID)
 md = MarketData()
+# gets created by StrategyLoop.connect
+order_manager = None
 
 screen = None
 order_window = None
@@ -71,7 +72,7 @@ def print_action_menu():
 # keep our own dict of live_orders mapping their displayed numbers to
 # internal UUIDs 
 displayed_live_orders = {} 
-def print_live_orders(order_manager):
+def print_live_orders():
   displayed_live_orders.clear()
   order_window.erase()
   order_window.border(0)
@@ -81,7 +82,7 @@ def print_live_orders(order_manager):
     order = order_manager.get_order(order_id)
     displayed_id = i+1
     msg = "%d) venue = %d, symbol = %s, side = %s, price = %s, size = %s" % \
-      (displayed_id, order.venue_id, order.symbol, order.side, order.price, order.qty)
+      (displayed_id, order.venue, order.symbol, order.side, order.price, order.qty)
     displayed_live_orders[displayed_id] = order_id
     order_window.addstr(4 + i, 5, msg)  
   order_window.refresh()
@@ -95,7 +96,7 @@ def dialog(fn, *args, **kwds):
   action_window.timeout(250)
   
 @dialog
-def new_order_dialog(order_manager):
+def new_order_dialog():
   action_window.addstr(2,3, "New")
   bids = md.collect_best_bids()
   bid_symbols = bids.keys()
@@ -138,7 +139,7 @@ def new_order_dialog(order_manager):
   order_manager.send_new_order(venue, symbol, side, price, size)
 
 @dialog
-def cancel_dialog(order_manager):
+def cancel_dialog():
   action_window.addstr(2,3, "Cancel")
   action_window.addstr(4,3, "Order num:")
   num_str = action_window.getstr(4, 13).strip()
@@ -148,10 +149,10 @@ def cancel_dialog(order_manager):
   order_manager.send_cancel(order_id)
 
 
-def ui_update(order_manager):
+def ui_update():
   try:
     print_market_data()
-    print_live_orders(order_manager)
+    print_live_orders()
     print_action_menu()
 
     x = action_window.getch()
@@ -161,9 +162,9 @@ def ui_update(order_manager):
     if x == 'A':
       order_manager.cancel_everything()
     elif x == 'N':
-      new_order_dialog(order_manager)
+      new_order_dialog()
     elif x == 'C':
-      cancel_dialog(order_manager)
+      cancel_dialog()
     elif x =='Q':
       curses.endwin()
       exit(0)
@@ -177,10 +178,9 @@ parser = ArgumentParser(description='Manual order entry')
 parser.add_argument('--config-server', type=str, default='tcp://*:11111', dest='config_server')
 if __name__ == '__main__':
   args = parser.parse_args()
-  strategy.connect(args.config_server)
-  
+  strategy = Strategy(STRATEGY_ID)
+  order_manager = strategy.connect(args.config_server)
   #atexit.register(strategy.close_all)
-  strategy.synchronize_market_data(md.update)
   init_ui()
-  strategy.main_loop(md.update, ui_update)
+  strategy.run(md.update, ui_update)
 

@@ -55,28 +55,30 @@ EXEC_TYPE = enum(
   PENDING_REPLACE  = 'E',
 ).map(ord)
 
-"""Order Types - FIX tag 40"""
-ORDER_TYPE = enum(
-  MARKET = '1',
-  LIMIT = '2',
-  STOP = '3',
-  STOP_LIMIT = '4',
-  MARKET_ON_CLOSE = '5',
-  WITH_OR_WITHOUT = '6',
-  LIMIT_OR_BETTER = '7',
-  LIMIT_WITH_OR_WITHOUT = '8',
-  ON_BASIS = '9',
-  ON_CLOSE = 'A',
-  LIMIT_ON_CLOSE = 'B',
-  FOREX_MARKET = 'C',
-  PREVIOUSLY_QUOTED = 'D',
-  PREVIOUSLY_INDICATED = 'E',
-  FOREX_LIMIT = 'F',
-  FOREX_SWAP = 'G',
-  FOREX_PREVIOUSLY_QUOTED = 'H',
-  FUNARI = 'I', # limit day order with executed portion handled as Market On Close e.g. Japan...
-  PEGGED = 'P',
-).map(ord)
+# Don't use this for talking to order engines, instead use constants defined 
+# in capk_globals protobuf 
+#"""Order Types - FIX tag 40"""
+#ORDER_TYPE = enum(
+#  MARKET = '1',
+#  LIMIT = '2',
+#  STOP = '3',
+#  STOP_LIMIT = '4',
+#  MARKET_ON_CLOSE = '5',
+#  WITH_OR_WITHOUT = '6',
+#  LIMIT_OR_BETTER = '7',
+#  LIMIT_WITH_OR_WITHOUT = '8',
+#  ON_BASIS = '9',
+#  ON_CLOSE = 'A',
+#  LIMIT_ON_CLOSE = 'B',
+#  FOREX_MARKET = 'C',
+#  PREVIOUSLY_QUOTED = 'D',
+#  PREVIOUSLY_INDICATED = 'E',
+#  FOREX_LIMIT = 'F',
+#  FOREX_SWAP = 'G',
+#  FOREX_PREVIOUSLY_QUOTED = 'H',
+#  FUNARI = 'I', # limit day order with executed portion handled as Market On Close e.g. Japan...
+#  PEGGED = 'P',
+#).map(ord)
 
 
 """Exec instruction - FIX tag 18"""
@@ -133,6 +135,8 @@ HANDLING_INSTRUCTION = enum(
   MANUAL = '3', 
 ).map(ord)
   
+# Don't use this for talking to the order engines, 
+# instead use constants defined in capk_globals 
 #  Time in Force - FIX tag 59"
 #TIME_IN_FORCE = enum(
 #  DAY = '0',
