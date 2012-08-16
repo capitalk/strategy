@@ -120,6 +120,7 @@ class OrderManager:
     # For now just remove the old IDs from live_order_ids 
     #order = self._remove_order(old_id)
     
+    order = self.orders[old_id]
     order.id = new_id
     self.orders[new_id] = order
     if old_id in self.live_order_ids:
@@ -191,7 +192,7 @@ class OrderManager:
     # For now we crash if the ECN tries to cancel or correct a previous
     # transaction 
     unsupported_transaction_types = [EXEC_TRANS_TYPE.CANCEL, EXEC_TRANS_TYPE.CORRECT] #EXEC_TRANS_TYPE.NEW, EXEC_TRANS_TYPE.STATUS
-    assert transaction_type not in unsupported_transaction_types \
+    assert transaction_type not in unsupported_transaction_types, \
       "Exec transaction type not yet implemented: %s " % \
       EXEC_TRANS_TYPE.to_str(transaction_type)
   
