@@ -28,7 +28,8 @@ class Cross:
     # this ID only gets set if we're trying to kill the cross
     # after being unequally filled and thus need a new order
     # to get out of the position 
-    self.hedge_order_id = None
+
+    self.rescue_order_id = None
     
   def send(self):
     assert not self.sent, "Can't sent the same cross twice"
@@ -75,7 +76,7 @@ def md_update_wrapper(bbo):
   if changed:
     updated_symbols.add(bbo.symbol)
 
-def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
+def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
   assert cross is None
   if len(updated_symbols) == 0: return
   best_cross = None
@@ -108,8 +109,8 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 100000000):
 def close_unbalanced_cross(bigger, smaller):
   order_manager.cancel_if_alive(bigger.id)
   if order_manager.is_alive(smaller.id):
-    request_id = order_manager.liquidate_order(md, smaller.id, bigger.filled_qty)
-    return request_id
+    cross.rescue_order_id = \
+      order_manager.liquidate_order(md, smaller.id, bigger.filled_qty)
   else:
     side, symbol, venue = smaller.side, smaller.symbol, smaller.venue
     # none of the smaller side's IDs are alive, so we need to put in a new order
@@ -120,8 +121,8 @@ def close_unbalanced_cross(bigger, smaller):
     qty_diff = bigger.filled_qty - smaller.filled_qty 
     assert qty_diff > 0, \
       "Why did you call close_unbalanced_cross if there's no fill difference?"
-    hedge_id = order_manager.send_new_order(venue, symbol, side, price, qty_diff)
-    return hedge_id
+    cross.rescue_order_id = \
+      order_manager.send_new_order(venue, symbol, side, price, qty_diff)
     
   
 def kill_cross():
@@ -143,11 +144,10 @@ def kill_cross():
   if bid.filled_qty == ask.filled_qty:
     order_manager.cancel_if_alive(bid.id)
     order_manager.cancel_if_alive(ask.id)
-    return None
   elif bid_qty > ask_qty:
-    return close_unbalanced_cross(bid, ask)
+    close_unbalanced_cross(bid, ask)
   else:
-    return close_unbalanced_cross(ask, bid)
+    close_unbalanced_cross(ask, bid)
 
 def both_dead(bid, offer):
   """Takes two dead orders and optionally places a hedge order if they
@@ -156,10 +156,9 @@ def both_dead(bid, offer):
   global cross 
   logging.debug ("Both sides dead")
   if bid.filled_qty > offer.filled_qty:
-    cross.hedge_order_id = close_unbalanced_cross(bid, offer)
-
+    close_unbalanced_cross(bid, offer)   
   elif bid.filled_qty < offer.filled_qty:
-    cross.hedge_order_id = close_unbalanced_cross(offer, bid)
+    close_unbalanced_cross(offer, bid)
   else:
     price_delta = offer.price - bid.price 
     profit = bid.filled_qty * price_delta 
@@ -170,12 +169,12 @@ def both_dead(bid, offer):
 def manage_active_cross(max_order_lifetime):
   if time.time() >= cross.send_time + max_order_lifetime: 
     # expired!
-    kill_cross(cross)
-  elif cross.hedge_order_id:
+    kill_cross()
+  elif cross.rescue_order_id:
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
-    order = order_manager.get_order(cross.hedge_order_id)
-    logging.debug("Hedge order: %s", order)
+    order = order_manager.get_order(cross.rescue_order_id)
+    logging.debug("Rescue order: %s", order)
     assert order_manager.is_alive(order.id) or order.filled_qty == order.qty, \
       """Shit! If our hedge orders don't get filled this could turn into an
          infinite loop of order placement. Better just quit and handle 
@@ -198,35 +197,38 @@ def manage_active_cross(max_order_lifetime):
     elif bid_alive and offer.filled_qty < offer.qty:
       logging.debug("Bid alive, offer dead with %d/%d filled", 
         offer.filled_qty, offer.qty)
-      cross.hedge_order_id = kill_cross(cross)
+      kill_cross()
     elif offer_alive and bid.filled_qty < bid.qty:
       logging.debug("Offer alive, bid dead with %d/%d filled", 
         offer.filled_qty, offer.qty)
-      cross.hedge_order_id = kill_cross(cross)
+      kill_cross()
     else:
       logging.debug("Still waiting for a fill (bid %d/%d, offer %d/%d)", 
         bid.filled_qty, bid.qty, offer.filled_qty, offer.qty)
     
 
-def outgoing_logic(min_cross_magnitude = 50, new_order_delay = 0,  max_order_lifetime = 5):
-  global cross 
+def outgoing_logic(min_cross_magnitude, 
+      new_order_delay = 0, 
+      max_order_lifetime = 5, 
+      max_order_qty = 10 ** 8):
   if cross is not None:
     if not cross.sent:
       cross.send_when_ready(new_order_delay)
     else:
       manage_active_cross(cross, max_order_lifetime)
-      
+  # this has to come second since the functions above might find the 
+  # cross is finished and reset the global 'cross' variable to None    
   if cross is None:
-    cross = find_best_crossed_pair(min_cross_magnitude)
+    global cross
+    cross = find_best_crossed_pair(min_cross_magnitude, max_order_qty)
     # if there's no delay, send orders immediately, 
     # otherwise it will happen on the next update cycle 
-    if new_order_delay == 0: 
-      cross.send()
+    if new_order_delay == 0: cross.send()
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
 parser.add_argument('--config-server', type=str, default='tcp://*:11111', dest='config_server')
-parser.add_argument('--max-order-size', type=int, default=10000000, dest='max_order_size')
+parser.add_argument('--max-order-qty', type=int, default=10 ** 8, dest='max_order_qty')
 parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay', 
   help='How many milliseconds should I delay orders by?')
 parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_wait_time', 
@@ -240,33 +242,13 @@ if __name__ == '__main__':
   args = parser.parse_args()
   strategy = Strategy(STRATEGY_ID)
   order_manager = strategy.connect(args.config_server)
-  atexit.register(strategy.close_all)
+  # TODO: Figure out why zmq sockets hang on exit
+  # atexit.register(strategy.close_all)
   def place_orders(order_manager):
-    outgoing_logic(args.min_cross_magnitude, args.order_delay, args.max_order_lifetime)
+    outgoing_logic(args.min_cross_magnitude, 
+      args.order_delay, 
+      args.max_order_lifetime, 
+      args.max_order_qty)
   strategy.run(md_update_wrapper, place_orders)
   
   
-  
-
-  """
-  OLD CODE
-  def first_live_id(ids):
-    for order_id in ids:
-      if order_id in order_manager.live_order_ids:
-        return order_id
-    logging.error("None of %s were alive", ids)
-    return None
-
-  def all_dead(ids):
-    return first_live_id(ids) == None
-
-  def cancel_all(ids):
-    for order_id in ids:
-      order_manager.cancel_if_alive(order_id)
-
-  def total_filled_qty(orders):
-    q = 0
-    for order in orders:
-      q += order.filled_qty
-    return q 
-  """

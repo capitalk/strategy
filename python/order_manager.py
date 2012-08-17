@@ -26,8 +26,13 @@ but we can simplify our model considerably if we focus on three states:
      order.id not in order_manager.live_order_ids 
 """
 
+#def fresh_internal_id(count = [0]):
+#  count[0] += 1
+#  return count[0]
+
 def fresh_id():
   return uuid.uuid4().bytes
+
 
 PendingChange = namedtuple('PendingChange', \
   ('request_id', 'old_id', 'price', 'qty', 'status', 'timestamp'))
