@@ -121,7 +121,10 @@ class Strategy:
     print "Requesting configuation from", config_server_addr
     config_socket.connect(config_server_addr)
     config_socket.send('C')
-    [tag, msg] = config_socket.recv_multipart()
+    response = poll_single_socket(config_socket)
+    if response is None:
+      raise RuntimeError("Config server is down")
+    [tag, msg] = response 
     assert tag == "CONFIG"
     config = venue_configuration_pb2.configuration()
     config.ParseFromString(msg)

@@ -89,12 +89,13 @@ def print_live_orders():
 
 
 def dialog(fn, *args, **kwds):
-  action_window.erase()
-  action_window.border(0)
-  action_window.timeout(-1)
-  fn(*args, **kwds)
-  action_window.timeout(250)
-  
+  def nested(*arg, **kwds):
+    action_window.erase()
+    action_window.border(0)
+    action_window.timeout(-1)
+    fn(*args, **kwds)
+    action_window.timeout(250)
+  return nested 
 @dialog
 def new_order_dialog():
   action_window.addstr(2,3, "New")
@@ -175,7 +176,7 @@ def ui_update():
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Manual order entry') 
-parser.add_argument('--config-server', type=str, default='tcp://*:11111', dest='config_server')
+parser.add_argument('--config-server', type=str, default='tcp://127.0.0.1:11111', dest='config_server')
 if __name__ == '__main__':
   args = parser.parse_args()
   strategy = Strategy(STRATEGY_ID)

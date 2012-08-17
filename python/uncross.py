@@ -211,6 +211,7 @@ def outgoing_logic(min_cross_magnitude,
       new_order_delay = 0, 
       max_order_lifetime = 5, 
       max_order_qty = 10 ** 8):
+  global cross
   if cross is not None:
     if not cross.sent:
       cross.send_when_ready(new_order_delay)
@@ -219,7 +220,6 @@ def outgoing_logic(min_cross_magnitude,
   # this has to come second since the functions above might find the 
   # cross is finished and reset the global 'cross' variable to None    
   if cross is None:
-    global cross
     cross = find_best_crossed_pair(min_cross_magnitude, max_order_qty)
     # if there's no delay, send orders immediately, 
     # otherwise it will happen on the next update cycle 
