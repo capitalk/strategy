@@ -1,8 +1,6 @@
 #ifndef __ORDER_MANAGER__
 #define __ORDER_MANAGER__
 
-#include "logging.h"
-#include "timing.h"
 
 #include <zmq.hpp>
 #include <signal.h>
@@ -24,14 +22,16 @@
 
 #include <uuid/uuid.h>
 
-#include "msg_cache.h"
-#include "msg_types.h"
-#include "strategy_base/client_order_interface.h"
-#include "strategy_base/client_market_data_interface.h"
-#include "strategy_base/order_mux.h"
-#include "strategy_base/market_data_mux.h"
-#include "strategy_base/order.h"
+#include "client_order_interface.h"
+#include "client_market_data_interface.h"
+#include "order_mux.h"
+#include "market_data_mux.h"
+#include "order.h"
 
+#include "utils/msg_types.h"
+#include "utils/order_constants.h"
+#include "utils/logging.h"
+#include "utils/timing.h"
 #include "utils/time_utils.h"
 #include "utils/bbo_book_types.h"
 #include "utils/types.h"
@@ -40,18 +40,18 @@
 // namespace stuff
 using google::dense_hash_map;
 
-
+namespace capk {
 
 // Hash tables and typedefs for storing order states
-typedef dense_hash_map<order_id_t, capk::Order, std::tr1::hash<order_id>, eq_order_id> order_map_t;
+typedef dense_hash_map<order_id_t, Order, std::tr1::hash<order_id>, eq_order_id> order_map_t;
 typedef order_map_t::iterator order_map_iter_t;
 typedef std::pair<order_map_iter_t, bool> order_map_insert_t;
-typedef std::pair<order_id_t, capk::Order> order_map_value_t;
-/*
-order_map_t pendingOrders;
-order_map_t workingOrders;
-order_map_t completedOrders;	
-*/
+typedef std::pair<order_id_t, Order> order_map_value_t;
+
+extern order_map_t pendingOrders;
+extern order_map_t workingOrders;
+extern order_map_t completedOrders;	
+
 void list_orders();
 
 //capkproto::new_order_single
@@ -74,5 +74,6 @@ void printOrderHash(order_map_t& om);
 
 void list_orders();
 
+} // namespace capk
 
 #endif // __ORDER_MANAGER__

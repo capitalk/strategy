@@ -4,6 +4,7 @@
 #include <zmq.hpp>
 #include <string>
 
+namespace capk {
 class ClientMarketDataInterface
 {
 	public:
@@ -50,5 +51,6 @@ class ClientMarketDataInterface
 		bool _initComplete;
 
 };
+}; // namespace capk
 
 #endif // __CLIENT_MARKET_DATA_INTERFACE__

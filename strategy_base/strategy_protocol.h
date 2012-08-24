@@ -1,8 +1,6 @@
 #ifndef __STRATEGY_PROTOCOL__
 #define __STRATEGY_PROTOCOL__
 
-#include "logging.h"
-#include "timing.h"
 
 #include <zmq.hpp>
 #include <signal.h>
@@ -24,20 +22,24 @@
 
 #include <uuid/uuid.h>
 
-#include "msg_cache.h"
-#include "msg_types.h"
-#include "strategy_base/client_order_interface.h"
-#include "strategy_base/client_market_data_interface.h"
-#include "strategy_base/order_mux.h"
-#include "strategy_base/market_data_mux.h"
-#include "strategy_base/order.h"
+#include "client_order_interface.h"
+#include "client_market_data_interface.h"
+#include "order_mux.h"
+#include "market_data_mux.h"
+#include "order.h"
 
+#include "utils/logging.h"
+#include "utils/timing.h"
+#include "utils/order_constants.h"
+#include "utils/msg_types.h"
 #include "utils/time_utils.h"
 #include "utils/bbo_book_types.h"
 #include "utils/types.h"
 #include "utils/venue_globals.h"
 
 #define MAX_MSGSIZE 256
+
+namespace capk {
 
 int snd_HELO(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id,
@@ -62,5 +64,6 @@ void snd_NEW_ORDER(zmq::socket_t* order_interface,
         const capk::venue_id_t venueID, 
         capkproto::new_order_single& nos);
 
+}
 
 #endif // __STRATEGY_PROTOCOL__

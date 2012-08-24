@@ -1,8 +1,10 @@
 #include "client_market_data_interface.h"
-#include "logging.h"
+
+#include "utils/logging.h"
 
 #include <zmq.hpp>
 
+namespace capk {
 
 ClientMarketDataInterface::~ClientMarketDataInterface()
 {
@@ -155,3 +157,4 @@ ClientMarketDataInterface::run()
 }
 */
 
+}; // namespace capk

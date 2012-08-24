@@ -226,4 +226,4 @@ class Strategy:
               [tag, msg] = socket.recv_multipart()
               tag = int_from_bytes(tag) 
               self.order_manager.received_message_from_order_engine(tag, msg)
-        place_orders()
+        place_orders(order_manager)
