@@ -49,7 +49,7 @@ class Order:
     # but really the identifier isn't legitimate until
     # we get a response from the ECN, so I'm also putting
     # the same id as pending  
-    self.pending_id = order_id
+    self.pending_ids = set([order_id])
     curr_time = time.time()
     self.creation_time = curr_time
     self.last_update_time = curr_time
@@ -75,22 +75,19 @@ class Order:
     self.status = new_status
     self.last_update_time = time.time()
  
-  def set_pending_id(self, pending_id):
-    assert self.pending_id is None, \
-      "Can't have two pending IDs at once: old %s and new %s" % \
-      (uuid_str(self.pending_id), uuid_str(pending_id))
-    self.pending_id = pending_id
     
-  def pending_id_accepted(self):
-    assert self.pending_id is not None, \
-      "Expected pending ID for order %s" % uuid_str(self.id)
+  def pending_id_accepted(self, pending_id):
+    assert pending_id in self.pending_ids, \
+      "Unexpected pending ID %s for order %s" % \
+      (uuid_str(pending_id), uuid_str(self.id))
     self.id = self.pending_id
-    self.pending_id = None
+    self.pending_ids.remove(pending_id)
 
-  def pending_id_rejected(self):
-    assert self.pending_id is not None, \
-      "Expected pending ID for order %s" % uuid_str(self.id)
-    self.pending_id = None
+  def pending_id_rejected(self, pending_id):
+    assert pending_id in self.pending_ids, \
+      "Unexpected pending ID %s for order %s"  % \
+      (uuid_str(pending_id), uuid_str(self.id))
+    self.pending_ids.remove(pending_id)
 
   def __str__(self):
     return "Order<id = %s, side = %s, price = %s, qty = %d>" % \
@@ -248,19 +245,19 @@ class OrderManager:
     # there is only order_id and an undefined value in original_order_id
     if transaction_type == EXEC_TRANS_TYPE.NEW:
       if exec_type == EXEC_TYPE.NEW:
-        order.pending_id_accepted()
+        order.pending_id_accepted(order_id)
       elif exec_type in [EXEC_TYPE.CANCELLED,  EXEC_TYPE.REPLACE]:
-        if order.pending_id is None:
+        if order_id not in order.pending_ids:
           logging.warning("Unsolicited %s of %s", EXEC_TYPE.to_str(exec_type), uuid_str(original_order_id))
         else:
           assert original_order_id in self.live_order_ids   
           self._rename(original_order_id, order_id)
-          order.pending_id_accepted()
+          order.pending_id_accepted(order_id)
       elif exec_type == EXEC_TYPE.REJECTED:
         # presumably this only happens if the order failed to 
         # enter the order book in the first place
         assert order.id is None
-        order.pending_id_rejected() 
+        order.pending_id_rejected(order_id) 
 
     ################################################
     #     Is the order in a terminal state?        #
@@ -282,8 +279,8 @@ class OrderManager:
     assert orig_id in self.orders, \
       "Cancel reject for unknown original order ID %s" % uuid_str(orig_id)
     order = self.get(orig_id)
-    if order.pending_id == order_id:
-      order.pending_id_rejected()
+    if order_id in order.pending_ids:
+      order.pending_id_rejected(order_id)
     else:
       logging.warning("Got unexepcted cancel rejection")
       
@@ -373,7 +370,7 @@ class OrderManager:
     
     request_id = fresh_id()
     self.orders[request_id] = order
-    order.set_pending_id(request_id)
+    order.pending_ids.add(request_id)
  
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
     venue = order.venue 
@@ -396,7 +393,7 @@ class OrderManager:
     order = self.orders[order_id]
     request_id = fresh_id()
     self.orders[request_id] = order 
-    order.set_pending_id(request_id)
+    order.pending_ids.add(request_id)
 
     pb = self._make_cancel_request(request_id, order)
     tag = int_to_bytes(order_engine_constants.ORDER_CANCEL)

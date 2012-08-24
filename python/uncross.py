@@ -72,7 +72,6 @@ class Cross:
     
 def md_update_wrapper(bbo):
   """Update market data and add any changed symbols to 'updated_symbols' set"""
-  print bbo
   changed = md.update(bbo)
   if changed:
     updated_symbols.add(bbo.symbol)
@@ -231,7 +230,6 @@ def outgoing_logic(min_cross_magnitude,
   # cross is finished and reset the global 'cross' variable to None    
   if cross is None:
     cross = find_best_crossed_pair(min_cross_magnitude, max_order_qty)
-    print cross
     # if there's no delay, send orders immediately, 
     # otherwise it will happen on the next update cycle 
     if new_order_delay == 0 and cross is not None: cross.send()
@@ -260,6 +258,6 @@ if __name__ == '__main__':
       args.order_delay, 
       args.max_order_lifetime, 
       args.max_order_qty)
-  strategy.run(order_manager, md_update_wrapper, place_orders)
+  strategy.run(md_update_wrapper, place_orders)
   
   
