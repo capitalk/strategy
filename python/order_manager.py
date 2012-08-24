@@ -33,23 +33,26 @@ but we can simplify our model considerably if we focus on three states:
 def fresh_id():
   return uuid.uuid4().bytes
 
+def uuid_str(bytes):
+  return str(uuid.UUID(bytes=bytes))
 
 PendingChange = namedtuple('PendingChange', \
   ('request_id', 'old_id', 'price', 'qty', 'status', 'timestamp'))
 
 class Order:
-  def __init__(self, venue, symbol, side, price, qty,
-      order_type =  LIM, time_in_force = GFD,  
-      id = None):
+  def __init__(self, order_id, venue, symbol, side, price, qty,
+      order_type =  LIM, time_in_force = GFD):
     
+    self.id = order_id
+    # Not sure what to do with new Orders--- we give 
+    # them an id value since it's messy to put None there
+    # but really the identifier isn't legitimate until
+    # we get a response from the ECN, so I'm also putting
+    # the same id as pending  
+    self.pending_id = order_id
     curr_time = time.time()
     self.creation_time = curr_time
     self.last_update_time = curr_time
-    
-    if id is None: 
-      self.id = fresh_id()
-    else:
-      self.id = id 
       
   
     self.venue = venue 
@@ -71,14 +74,33 @@ class Order:
   def set_status(self, new_status):
     self.status = new_status
     self.last_update_time = time.time()
-         
+ 
+  def set_pending_id(self, pending_id):
+    assert self.pending_id is None, \
+      "Can't have two pending IDs at once: old %s and new %s" % \
+      (uuid_str(self.pending_id), uuid_str(pending_id))
+    self.pending_id = pending_id
+    
+  def pending_id_accepted(self):
+    assert self.pending_id is not None, \
+      "Expected pending ID for order %s" % uuid_str(self.id)
+    self.id = self.pending_id
+    self.pending_id = None
+
+  def pending_id_rejected(self):
+    assert self.pending_id is not None, \
+      "Expected pending ID for order %s" % uuid_str(self.id)
+    self.pending_id = None
+
+  def __str__(self):
+    return "Order<id = %s, side = %s, price = %s, qty = %d>" % \
+      (uuid_str(self.id), self.side, self.price, self.qty)  
+
 class OrderManager:
   def __init__(self, strategy_id, order_sockets):
     """order_sockets maps venue ids to zmq DEALER sockets"""
     self.orders = {}
     self.live_order_ids = set([])
-    # changes which haven't been applied yet
-    self.pending = {}
     # use the strategy id when constructing protobuffers
     self.strategy_id = strategy_id
     self.order_sockets = order_sockets
@@ -86,10 +108,9 @@ class OrderManager:
     
     
   def get_order(self, order_id):
-    if order_id in self.orders:
-      return self.orders[order_id]
-    else:
-      raise RuntimeError("Couldn't find order id %s" % order_id)
+    assert order_id in self.orders,\
+      "Couldn't find order id %s" % uuid_str(order_id)
+    return self.orders[order_id]
   
   def is_alive(self, order_id):
     return order_id in self.live_order_ids
@@ -116,10 +137,8 @@ class OrderManager:
     
   
   def _rename(self, old_id, new_id):
-    assert old_id in self.orders, "Can't rename non-existent order %s" % old_id
-    assert old_id in self.live_order_ids, "Can't rename dead order %s" % old_id
-    assert new_id not in self.orders, \
-      "Can't rename %s to %s since new order id already exists" % (old_id, new_id)
+    assert old_id in self.orders, "Can't rename non-existent order %s" % uuid_str(old_id)
+    assert old_id in self.live_order_ids, "Can't rename dead order %s" % uuid_str(old_id)
    
     # WE MIGHT NEED TO REFER TO THE ORDERS BY THEIR OLD NAMES! 
     # For now just remove the old IDs from live_order_ids 
@@ -148,8 +167,8 @@ class OrderManager:
     order = self._rename(order_id, cancel_id)
     order.set_status(ORDER_STATUS.CANCELLED)
     
-  def _update_order(self, id, price, qty, filled_qty, unfilled_qty, status):
-    order = self.get_order(id)
+  def _update_order(self, order, price, qty, filled_qty, unfilled_qty, status):
+  
     changed = False
     if order.price != price:
       order.price = price 
@@ -179,9 +198,10 @@ class OrderManager:
      
   def _handle_execution_report(self, er):
     order_id = er.cl_order_id
+
     # only used for cancel and cancel/replace
     original_order_id = er.orig_cl_order_id 
-
+     
     status = er.order_status
     exec_type = er.exec_type
     transaction_type = er.exec_trans_type
@@ -190,6 +210,11 @@ class OrderManager:
     filled_qty = er.cum_qty 
     unfilled_qty = er.leaves_qty
     
+    logging.info("Exec Report: order_id = %s, orig_id = %s, status = %s, exec_type = %s", 
+      uuid_str(order_id), uuid_str(original_order_id), EXEC_TYPE.to_str(status), 
+      EXEC_TYPE.to_str(exec_type))     
+
+ 
     # NEW transactions are updates to our state and STATUS transactions just
     # repeat the values of the most recent transaction. The trickier cases
     # are CANCEL and CORRECT, which refer to the exec_id of the previous 
@@ -205,44 +230,38 @@ class OrderManager:
     unsupported_exec_types = [EXEC_TYPE.STOPPED, EXEC_TYPE.SUSPENDED, EXEC_TYPE.RESTATED,  EXEC_TYPE.CALCULATED]
     assert exec_type not in unsupported_exec_types, \
       "Unsupported exec_type = %s, order status = %s, order_id = %s, original_order_id = %s" % \
-      (EXEC_TYPE.to_str(exec_type), EXEC_TYPE.to_str(status), order_id, original_order_id)
+      (EXEC_TYPE.to_str(exec_type), EXEC_TYPE.to_str(status), 
+       uuid_str(order_id), uuid_str(original_order_id))
       
-    
-    # It's possible to get unsolicited cancels and replaces, in which case
-    # there is only order_id and an undefined value in original_order_id
-    if transaction_type == EXEC_TRANS_TYPE.NEW and \
-        exec_type in [EXEC_TYPE.NEW, EXEC_TYPE.CANCELLED, EXEC_TYPE.REPLACE, EXEC_TYPE.REJECTED]:
-      if order_id in self.pending:
-        del self.pending[order_id]
-      else:
-        logging.warning(\
-          "Warning: Got unexpected execution report for %s (id = %s, original id = %s)", 
-          EXEC_TYPE.to_str(exec_type), order_id, original_order_id)
-    
-    
-    ###########################################################
-    #      Rename replaced/canceled orders, kill rejected    #
-    ##########################################################
-    if transaction_type == EXEC_TRANS_TYPE.NEW and \
-        exec_type in [EXEC_TYPE.REPLACE, EXEC_TYPE.CANCELLED]:
-      # for now we're not dealing with unsolicited cancels
-      assert original_order_id in self.live_order_ids   
-      self._rename(original_order_id, order_id)
      
     ##################################
     #      Update Order fields       #
     ##################################
     
-    # The logic for which ID to use is messy due to weird interactions
-    # between STATUS transactions, cancels/replaces, unsolicited cancels/replaces, 
-    # etc...
-    # So, we rename the orders above and then assume we can ignore original_order_id.
-    # Eventually we should use the _update_order method to also track position. 
-    assert order_id in self.orders, \
+    assert original_order_id in self.orders,\
       "Unknown order id = %s, price = %f, qty = %s, filled = %s" % \
-      (order_id, price, qty, filled_qty)
-    self._update_order(order_id, price, qty, filled_qty, unfilled_qty, status)
-  
+      (uuid_str(order_id), price, qty, filled_qty)
+    order = self.get_order(original_order_id)
+    self._update_order(order, price, qty, filled_qty, unfilled_qty, status)
+    
+    # It's possible to get unsolicited cancels and replaces, in which case
+    # there is only order_id and an undefined value in original_order_id
+    if transaction_type == EXEC_TRANS_TYPE.NEW:
+      if exec_type == EXEC_TYPE.NEW:
+        order.pending_id_accepted()
+      elif exec_type in [EXEC_TYPE.CANCELLED,  EXEC_TYPE.REPLACE]:
+        if order.pending_id is None:
+          logging.warning("Unsolicited %s of %s", EXEC_TYPE.to_str(exec_type), uuid_str(original_order_id))
+        else:
+          assert original_order_id in self.live_order_ids   
+          self._rename(original_order_id, order_id)
+          order.pending_id_accepted()
+      elif exec_type == EXEC_TYPE.REJECTED:
+        # presumably this only happens if the order failed to 
+        # enter the order book in the first place
+        assert order.id is None
+        order.pending_id_rejected() 
+
     ################################################
     #     Is the order in a terminal state?        #
     ################################################
@@ -252,24 +271,28 @@ class OrderManager:
         self.live_order_ids.remove(order_id)
       elif transaction_type == EXEC_TRANS_TYPE.NEW:
         logging.warning("Order %s should have been alive before entering terminal state %s", 
-          order_id, ORDER_STATUS.to_str(status))
+          uuid_str(order_id), ORDER_STATUS.to_str(status))
   
   
   def _handle_cancel_reject(self, cr):
     order_id = cr.cl_order_id  
-    if order_id in self.pending:
-      pending_change = self.pending[order_id]
-      assert pending_change.old_id == cr.orig_cl_order_id
-      assert pending_change.request_id == order_id
-      del self.pending[cr.cl_order_id]
+    orig_id = cr.orig_cl_order_id
+    logging.warning("Cancel reject: order_id = %s, orig_id = %s", 
+      uuid_str(order_id), uuid_str(orig_id))
+    assert orig_id in self.orders, \
+      "Cancel reject for unknown original order ID %s" % uuid_str(orig_id)
+    order = self.get(orig_id)
+    if order.pending_id == order_id:
+      order.pending_id_rejected()
     else:
-      print "Got unexepcted cancel rejection: %s" % cr
+      logging.warning("Got unexepcted cancel rejection")
       
   def received_message_from_order_engine(self, tag, msg):
     if tag == order_engine_constants.EXEC_RPT:
       er = execution_report()
       er.ParseFromString(msg)
       self._handle_execution_report(er)
+    
     elif tag == order_engine_constants.ORDER_CANCEL_REJ:
       cr = order_cancel_reject()
       cr.ParseFromString(msg)
@@ -301,7 +324,7 @@ class OrderManager:
     order_pb.price = order.price
     order_pb.time_in_force = order.time_in_force
     # order_pb.account = None
-    order_pb.venue = order.venue
+    order_pb.venue_id = order.venue
     return order_pb
     
   def _make_cancel_replace_request(self, request_id, order, price, qty):
@@ -326,21 +349,17 @@ class OrderManager:
     #  (venue, symbol, side, price, qty)
     
     order_id = fresh_id()
-    order = Order(venue, symbol, side, price, qty, id = order_id,
+    order = Order(order_id, venue, symbol, side, price, qty, 
       order_type = order_type, time_in_force = time_in_force)
     self.orders[order_id] = order
     self.live_order_ids.add(order_id)
 
-    change = PendingChange(old_id = None, request_id = order_id, 
-      status = ORDER_STATUS.NEW, price = price, qty = qty, 
-      timestamp = time.time())
-    self.pending[order_id] = change
     pb = self._make_new_order_request(order)
     socket = self.order_sockets[venue]
     tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, order_id, bytes])
-    logging.debug("Sent new order to %s: %s", venue, order)
+    logging.info("Sent new order to %s: %s", venue, order)
     return order_id
  
   def send_cancel_replace(self, order_id, price, qty):
@@ -349,14 +368,13 @@ class OrderManager:
     assert order_id in self.live_order_ids
     order = self.orders[order_id]
     assert order.price != price or order.qty != qty, \
-      "Trying to cancel/replace without changing anything for order %s" % order-id
+      "Trying to cancel/replace without changing anything for order %s" % \
+      uuid_str(order_id) 
     
     request_id = fresh_id()
-    change = \
-      PendingChange(old_id = order_id, request_id = request_id,
-        price = price, qty = qty, status = None, timestamp = time.time())
-    self.pending[request_id] = change
-    
+    self.orders[request_id] = order
+    order.set_pending_id(request_id)
+ 
     pb = self._make_cancel_replace_request(request_id, order, price, qty)
     venue = order.venue 
     socket = self.order_sockets[venue]
@@ -364,29 +382,28 @@ class OrderManager:
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
 
-    logging.debug(\
-     "Sent cancel/replace to %s: orig_id = %s, new_id = %s, price = %s, qty= %s",
-      venue, order_id, request_id, price, qty)
+    logging.info(\
+     "Sent cancel/replace to %s: orig_id = %s, new_id = %s, price = %s, qty= %s", 
+     venue, uuid_str(order_id), uuid_str(request_id), price, qty)
     return request_id
     
   def send_cancel(self, order_id):
     #print "Attempting to cancel order %s" % order_id
-    
-    assert order_id in self.orders, "Unknown order %s" % order_id
-    assert order_id in self.live_order_ids, "Can't cancel dead order %s" % order_id
+    logging.info("Sending cancel for %s", uuid_str(order_id))
+    assert order_id in self.orders, "Unknown order %s" % uuid_str(order_id)
+    assert order_id in self.live_order_ids, "Can't cancel dead order %s" % uuid_str(order_id)
     order = self.orders[order_id]
     request_id = fresh_id()
-    change = PendingChange(old_id=order_id, 
-      request_id=request_id, status = ORDER_STATUS.CANCELLED, 
-      price = None, qty = None, timestamp = time.time())
-    self.pending[request_id] = change
+    self.orders[request_id] = order 
+    order.set_pending_id(request_id)
 
     pb = self._make_cancel_request(request_id, order)
     tag = int_to_bytes(order_engine_constants.ORDER_CANCEL)
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue]
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
-    logging.debug("Sent cancel to %s: order_id = %s", order_id)
+    logging.info("Sent cancel: order_id = %s orig_id = %s", 
+      uuid_str(request_id), uuid_str(order_id))
     return request_id
   
   def cancel_if_alive(self, order_id):
@@ -412,7 +429,7 @@ class OrderManager:
        replaces all open orders with significantly worse prices
        likely to transact  """
    
-    logging.debug("Attempting to liquidate all %d open orders", len(self.live_order_ids))
+    logging.info("Attempting to liquidate all %d open orders", len(self.live_order_ids))
     request_ids = []
     for order_id in self.live_order_ids:
       request_id = self.liquidate_order(md, order_id)

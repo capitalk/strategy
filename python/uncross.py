@@ -5,7 +5,7 @@ from market_data import MarketData
 from strategy_loop import Strategy 
 from proto_objs.capk_globals_pb2 import BID, ASK
 
-
+logging.basicConfig(level=logging.INFO)
 STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
 md = MarketData()
 # we get an order_manager back from Strategy.connect
@@ -60,9 +60,9 @@ class Cross:
     ready_to_send = self.start_time + wait_time >= time.time()
     if ready_to_send: 
       self.send()
-      logging.debug("Sent orders for %s",  self)
+      logging.info("Sent orders for %s",  self)
     else:
-      logging.debug("Waiting to send orders for %s", self)
+      logging.info("Waiting to send orders for %s", self)
     
   
   def __str__(self):
@@ -93,13 +93,13 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
         else:
           cross_size = min(bid_entry.size, offer_entry.size)
           cross_magnitude = price_difference * cross_size
-          print "--- ", symbol, cross_size, cross_magnitude
+          logging.info("Cross found: %s %d @ %s", symbol, cross_size, cross_magnitude)
           if yen_pair: cross_magnitude /= 80
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid_entry = bid_entry, offer_entry = offer_entry)
             best_cross_magnitude = cross_magnitude 
   if best_cross is not None:
-    logging.debug("Best cross: %s", best_cross)
+    logging.info("Best cross: %s", best_cross)
     if best_cross_magnitude < min_cross_magnitude: 
       best_cross = None
   updated_symbols.clear()
@@ -114,7 +114,7 @@ def close_unbalanced_cross(bigger, smaller):
   else:
     side, symbol, venue = smaller.side, smaller.symbol, smaller.venue
     # none of the smaller side's IDs are alive, so we need to put in a new order
-    logging.debug(\
+    logging.info(\
       "Dead order for %s on %s (side = %s, %d) needs %s",
        symbol, venue, side, smaller.filled_qty, bigger.filled_qty)
     price = md.liquidation_price(side, symbol, venue)
@@ -154,7 +154,7 @@ def both_dead(bid, offer):
      are unevenly filled
   """
   global cross 
-  logging.debug ("Both sides dead")
+  logging.info ("Both sides dead")
   if bid.filled_qty > offer.filled_qty:
     close_unbalanced_cross(bid, offer)   
   elif bid.filled_qty < offer.filled_qty:
@@ -162,24 +162,24 @@ def both_dead(bid, offer):
   else:
     price_delta = offer.price - bid.price 
     profit = bid.filled_qty * price_delta 
-    logging.debug("Cross completed! Profit = %s %s",
+    logging.info("Cross completed! Profit = %s %s",
      profit,  bid.symbol)
     cross = None
       
 def manage_active_cross(max_order_lifetime):
-  if time.time() >= cross.send_time + max_order_lifetime: 
-    # expired!
-    kill_cross()
-  elif cross.rescue_order_id:
+  if cross.rescue_order_id:
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
     order = order_manager.get_order(cross.rescue_order_id)
-    logging.debug("Rescue order: %s", order)
+    logging.info("Rescue order: %s", order)
     assert order_manager.is_alive(order.id) or order.filled_qty == order.qty, \
       """Shit! If our hedge orders don't get filled this could turn into an
          infinite loop of order placement. Better just quit and handle 
          this situation manually.
       """
+  elif time.time() >= cross.send_time + max_order_lifetime: 
+    # expired!
+    kill_cross()
   else:
     bid_id = cross.bid_order_id
     bid_alive = order_manager.is_alive(bid_id)
@@ -192,19 +192,26 @@ def manage_active_cross(max_order_lifetime):
     if not (bid_alive or offer_alive ): 
       both_dead(bid, offer)
     elif bid_alive and offer_alive:
-      logging.debug("Both orders alive for %s, bid filled = %d, ask filled = %d",
-        bid.symbol, bid.filled_qty, offer.filled_qty)  
+      #logging.info("Both orders alive for %s, bid filled = %d, ask filled = %d",
+      #  bid.symbol, bid.filled_qty, offer.filled_qty)  
+      sys.stdout.write("-")
+      sys.stdout.flush()
     elif bid_alive and offer.filled_qty < offer.qty:
-      logging.debug("Bid alive, offer dead with %d/%d filled", 
+      # offer is dead with a partial fill 
+      logging.info("Bid alive, offer dead with %d/%d filled", 
         offer.filled_qty, offer.qty)
       kill_cross()
     elif offer_alive and bid.filled_qty < bid.qty:
-      logging.debug("Offer alive, bid dead with %d/%d filled", 
+      # bid is dead with a partial fill 
+      logging.info("Offer alive, bid dead with %d/%d filled", 
         offer.filled_qty, offer.qty)
       kill_cross()
     else:
-      logging.debug("Still waiting for a fill (bid %d/%d, offer %d/%d)", 
-        bid.filled_qty, bid.qty, offer.filled_qty, offer.qty)
+      # only one side alive, waiting for a fill on the other side 
+      sys.stdout.write('!')
+      sys.stdout.flush()
+      #logging.info("Still waiting for a fill (bid %d/%d, offer %d/%d)", 
+      #  bid.filled_qty, bid.qty, offer.filled_qty, offer.qty)
     
 
 def outgoing_logic(min_cross_magnitude, 
@@ -216,14 +223,14 @@ def outgoing_logic(min_cross_magnitude,
     if not cross.sent:
       cross.send_when_ready(new_order_delay)
     else:
-      manage_active_cross(cross, max_order_lifetime)
+      manage_active_cross(max_order_lifetime)
   # this has to come second since the functions above might find the 
   # cross is finished and reset the global 'cross' variable to None    
   if cross is None:
     cross = find_best_crossed_pair(min_cross_magnitude, max_order_qty)
     # if there's no delay, send orders immediately, 
     # otherwise it will happen on the next update cycle 
-    if new_order_delay == 0: cross.send()
+    if cross and new_order_delay == 0: cross.send()
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 
@@ -244,7 +251,7 @@ if __name__ == '__main__':
   order_manager = strategy.connect(args.config_server)
   # TODO: Figure out why zmq sockets hang on exit
   # atexit.register(strategy.close_all)
-  def place_orders(order_manager):
+  def place_orders():
     outgoing_logic(args.min_cross_magnitude, 
       args.order_delay, 
       args.max_order_lifetime, 

@@ -1,3 +1,5 @@
+import sys 
+import logging
 import collections 
 import time 
 from proto_objs.capk_globals_pb2 import BID, ASK
@@ -15,16 +17,20 @@ class MarketData:
     # set of symbols whose data has been updated since the last time the function 
     # 'find_best_crossed_pair' ran 
     
-  def update(self, bbo, print_dot = False):
+  def update(self, bbo, print_dot = True):
     timestamp = time.time()
 
-    symbol, venue = bbo.symbol, bbo.bid_venue  
+    symbol, venue = bbo.symbol, bbo.bid_venue_id 
     if venue == 0:
+      logging.warning("Venue ID was 0, changing to 890778")
       venue = 890778
-    #assert venue != 0
-    new_bid = Entry(bbo.bid_price, bbo.bid_size, venue, bbo.symbol, timestamp)  
-    new_offer = Entry(bbo.ask_price, bbo.ask_size, venue, bbo.symbol, timestamp)
-  
+    bid_size, bid_price = bbo.bid_size, bbo.bid_price
+    ask_size, ask_price = bbo.ask_size, bbo.ask_price
+    new_bid = Entry(bid_price, bid_size, venue, bbo.symbol, timestamp)  
+    new_offer = Entry(ask_price, ask_size, venue, bbo.symbol, timestamp)
+    if print_dot:
+      sys.stdout.write('.')
+      sys.stdout.flush()    
     bids = self.symbols_to_bids.setdefault(symbol, {})
     old_bid = bids.get(venue)
     changed = False 
