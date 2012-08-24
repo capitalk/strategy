@@ -6,7 +6,10 @@
 #include <string>
 
 #include "client_market_data_interface.h"
-#include "logging.h"
+
+#include "utils/logging.h"
+
+namespace capk {
 
 const size_t MAX_MARKET_DATA_INTERFACES = 10;
 
@@ -39,5 +42,6 @@ class MarketDataMux
 		
 
 };
+}; // namespace capk
 
 #endif // __MARKET_DATA_MUX__

@@ -20,7 +20,7 @@ class MarketData:
   def update(self, bbo, print_dot = True):
     timestamp = time.time()
 
-    symbol, venue = bbo.symbol, bbo.bid_venue_id 
+    symbol, venue = bbo.symbol, bbo.bid_venue_id
     if venue == 0:
       logging.warning("Venue ID was 0, changing to 890778")
       venue = 890778

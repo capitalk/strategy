@@ -1,9 +1,11 @@
 #include "order_mux.h"
-#include "msg_types.h"
+#include "utils/msg_types.h"
 #include "strategy_protocol.h"
 
 #include "proto/execution_report.pb.h"
 #include "proto/order_cancel_reject.pb.h"
+
+namespace capk {
 
 OrderMux::OrderMux(zmq::context_t* context, 
 				const std::string& inprocAddr):
@@ -280,5 +282,5 @@ OrderMux::rcv_RESPONSE(zmq::socket_t* sock)
 	//pan::log_DEBUG("OMUX Exiting recv loop");
 }
 
-
+}; // namespace capk
 

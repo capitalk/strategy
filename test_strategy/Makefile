@@ -4,29 +4,32 @@ CC=g++
 PROTOC=protoc
 
 
-SRC=..
+#SRC=..
+
+COMMON=../../common
+UTILS=$(COMMON)/src/c++
+UTILS_SRC=$(UTILS)/utils
+PROTO=$(COMMON)/proto
 
 BOOST=/usr/local/boost
-COLLECTORS=../../collectors
-ORDER_ENGINES=../../order_engines/order-fix
-STRATEGY_BASE=../strategy_base
-UTILS=$(COLLECTORS)/utils
-PROTO=$(COLLECTORS)/proto
+STRATEGY_BASE=..
+STRATEGY_BASE_SRC=../strategy_base
 
+INCLUDE= -I $(COMMON) \
+		 -I $(UTILS) \
+		 -I $(PANTHEIOS_ROOT)/include \
+		 -I $(STLSOFT)/include \
+		 -I $(STRATEGY_BASE)
 
-INCLUDE=-I$(BOOST) \
-		-I/usr/local/include/ \
-		-I..\
-	   	-I$(COLLECTORS) \
+#INCLUDE=-I$(BOOST) \
 		-I $(PANTHEIOS_ROOT)/include \
 		-I $(STLSOFT)/include \
 		-I $(UTILS) \
-		-I $(ORDER_ENGINES) \
+		-I $(PROTO) \
 		-I $(STRATEGY_BASE)
 
-		#-L/usr/local/lib 
-LIBS=	-L/tmp/zmq.debug/lib/ \
-      	-lquickfix -lboost_date_time \
+LIBS=	-lquickfix \
+		-lboost_date_time \
 		-lboost_program_options \
 		-lboost_filesystem \
 		-lzmq \
@@ -78,37 +81,37 @@ test_strategy.strat: test_strategy.o \
 test_strategy.o: test_strategy.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-strategy_protocol.o: $(STRATEGY_BASE)/strategy_protocol.cpp
+strategy_protocol.o: $(STRATEGY_BASE_SRC)/strategy_protocol.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-order_manager.o: $(STRATEGY_BASE)/order_manager.cpp
+order_manager.o: $(STRATEGY_BASE_SRC)/order_manager.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-client_order_interface.o: $(STRATEGY_BASE)/client_order_interface.cpp
+client_order_interface.o: $(STRATEGY_BASE_SRC)/client_order_interface.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-order_mux.o: $(STRATEGY_BASE)/order_mux.cpp
+order_mux.o: $(STRATEGY_BASE_SRC)/order_mux.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-market_data_mux.o: $(STRATEGY_BASE)/market_data_mux.cpp
+market_data_mux.o: $(STRATEGY_BASE_SRC)/market_data_mux.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-client_market_data_interface.o: $(STRATEGY_BASE)/client_market_data_interface.cpp
+client_market_data_interface.o: $(STRATEGY_BASE_SRC)/client_market_data_interface.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-order.o: $(STRATEGY_BASE)/order.cpp
+order.o: $(STRATEGY_BASE_SRC)/order.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-logging.o: $(UTILS)/logging.cpp
+logging.o: $(UTILS_SRC)/logging.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-jenkins_hash.o: $(UTILS)/jenkins_hash.cpp
+jenkins_hash.o: $(UTILS_SRC)/jenkins_hash.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-time_utils.o: $(UTILS)/time_utils.cpp
+time_utils.o: $(UTILS_SRC)/time_utils.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
-timing.o: $(UTILS)/timing.cpp
+timing.o: $(UTILS_SRC)/timing.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
 
 

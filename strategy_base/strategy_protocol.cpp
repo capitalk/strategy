@@ -1,5 +1,8 @@
 #include "strategy_protocol.h"
 
+namespace capk {
+
+
 /*
  * Async snd_HELO - 
  * N.B. USE THIS WHEN SENDING FROM MUX ASYNC - USE THE SYNC VERSION 
@@ -67,8 +70,8 @@ PING(zmq::context_t* pzmq_ctx,
             interface_ping_addr);
 //#endif
     ping_sock.connect(interface_ping_addr);
-	zmq::message_t ping_frame(sizeof(capk::PING));
-	memcpy(ping_frame.data(), &capk::PING, sizeof(capk::PING));
+	zmq::message_t ping_frame(sizeof(capk::PING_REQ));
+	memcpy(ping_frame.data(), &capk::PING_REQ, sizeof(capk::PING_REQ));
 //#ifdef LOG
     T0(a);
     pan::log_DEBUG("Sent PING msg (", to_simple_string(a).c_str(), ")");
@@ -318,4 +321,4 @@ snd_NEW_ORDER(zmq::socket_t* order_interface,
 #endif
 }
 
-
+}; // namespace capk

@@ -1,7 +1,10 @@
 #include "market_data_mux.h"
-#include "msg_types.h"
+
+#include "utils/msg_types.h"
 
 #include "proto/spot_fx_md_1.pb.h"
+
+namespace capk {
 
 MarketDataMux::MarketDataMux(zmq::context_t* context, 
     const std::string& inprocAddr):
@@ -195,4 +198,4 @@ MarketDataMux::rcv_RESPONSE(zmq::socket_t* sock)
 }
 
 
-
+}; // namespace capk

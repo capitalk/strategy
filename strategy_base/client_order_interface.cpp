@@ -1,5 +1,6 @@
 #include "client_order_interface.h"
-#include "logging.h"
+
+#include "utils/logging.h"
 
 #include <zmq.hpp>
 

@@ -1,13 +1,15 @@
-#include "logging.h"
-#include "timing.h"
 
 #include <zmq.hpp>
 #include <signal.h>
-
-#include "strategy_protocol.h"
-#include "order_manager.h"
+#include <unistd.h>
 
 #include "google/dense_hash_map"
+
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/thread.hpp>
+#include <boost/program_options.hpp>
+
+#include <uuid/uuid.h>
 
 #include "proto/new_order_single.pb.h"
 #include "proto/capk_globals.pb.h"
@@ -17,26 +19,23 @@
 #include "proto/order_cancel_replace.pb.h"
 #include "proto/spot_fx_md_1.pb.h"
 
-#include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/thread.hpp>
-#include <boost/program_options.hpp>
-
-#include <uuid/uuid.h>
-
-#include "msg_cache.h"
-#include "msg_types.h"
 #include "strategy_base/client_order_interface.h"
 #include "strategy_base/client_market_data_interface.h"
 #include "strategy_base/order_mux.h"
 #include "strategy_base/market_data_mux.h"
 #include "strategy_base/order.h"
+#include "strategy_base/strategy_protocol.h"
+#include "strategy_base/order_manager.h"
 
+#include "utils/logging.h"
+#include "utils/timing.h"
 #include "utils/time_utils.h"
+#include "utils/msg_types.h"
 #include "utils/bbo_book_types.h"
-#include "utils/types.h"
 #include "utils/venue_globals.h"
-
-#include "unistd.h"
+#include "utils/constants.h"
+#include "utils/order_constants.h"
+#include "utils/types.h"
 
 // namespace stuff
 using google::dense_hash_map;
@@ -44,7 +43,7 @@ namespace po = boost::program_options;
 
 // Global vars
 const char* STRATEGY_ID =  "7020f42e-b6c6-42d1-9b1e-65d968961a06";
-strategy_id_t sid;
+capk::strategy_id_t sid;
 
 const char* const ORDER_MUX = "inproc://order_mux";
 const char* const MD_MUX = "inproc://md_mux";
@@ -65,15 +64,15 @@ zmq::socket_t* pMDInterface = NULL;
 //typedef order_map_t::iterator order_map_iter_t;
 //typedef std::pair<order_map_iter_t, bool> order_map_insert_t;
 //typedef std::pair<order_id_t, capk::Order> order_map_value_t;
-extern order_map_t pendingOrders;
-extern order_map_t workingOrders;
-extern order_map_t completedOrders;	
+extern capk::order_map_t pendingOrders;
+extern capk::order_map_t workingOrders;
+extern capk::order_map_t completedOrders;	
 
 // Order multiplexer and its thread
-OrderMux* ptr_order_mux = NULL;
+capk::OrderMux* ptr_order_mux = NULL;
 boost::thread* omux_thread = NULL;
 // Market data multiplexer and its thread
-MarketDataMux* ptr_market_data_mux = NULL;
+capk::MarketDataMux* ptr_market_data_mux = NULL;
 boost::thread* mdmux_thread = NULL;
 
 // Signal handler setup for ZMQ
@@ -109,7 +108,7 @@ query_cancel()
 	std::string str_origoid;
 	std::cout << "CANCEL: Enter orig order id: " << std::endl;	
 	std::cin >> str_origoid;
-	order_id_t origoid;
+    capk::order_id_t origoid;
 	ret = origoid.parse(str_origoid.c_str());
     assert(ret == 0);
 	oc.set_orig_order_id(origoid.get_uuid(), origoid.size());
@@ -160,7 +159,7 @@ query_cancel_replace()
 	std::string str_origoid;
 	std::cout << "CANCEL REPLACE: Enter orig order id: " << std::endl;	
 	std::cin >> str_origoid;
-	order_id_t origoid;
+    capk::order_id_t origoid;
 	ret = origoid.parse(str_origoid.c_str());
     assert(ret == 0);
 	ocr.set_orig_order_id(origoid.get_uuid(), origoid.size());
@@ -352,21 +351,21 @@ init()
     // ORDER INTERFACE SETUP
     ///////////////////////////////////////////////////////////////////////////
     // Set the empty keys for storing orders in dense_hash_map
-	order_id_t oidEmpty("");
-    pendingOrders.set_empty_key(oidEmpty);
-    workingOrders.set_empty_key(oidEmpty);
-    completedOrders.set_empty_key(oidEmpty);
+    capk::order_id_t oidEmpty("");
+    capk::pendingOrders.set_empty_key(oidEmpty);
+    capk::workingOrders.set_empty_key(oidEmpty);
+    capk::completedOrders.set_empty_key(oidEmpty);
 
     // Set the deleted key
-    order_id_t oidDeleted("1");
-    pendingOrders.set_deleted_key(oidDeleted);
-    workingOrders.set_deleted_key(oidDeleted);
-    completedOrders.set_deleted_key(oidDeleted);
+    capk::order_id_t oidDeleted("1");
+    capk::pendingOrders.set_deleted_key(oidDeleted);
+    capk::workingOrders.set_deleted_key(oidDeleted);
+    capk::completedOrders.set_deleted_key(oidDeleted);
 
 
     //try {
     // create the market mux and add order interfaces
-	ptr_order_mux = new OrderMux(&ctx, 
+	ptr_order_mux = new capk::OrderMux(&ctx, 
 				 ORDER_MUX);
 
     capk::ClientOrderInterface* ptr_fxcm_order_interface 
@@ -399,7 +398,7 @@ init()
     }
     assert(addOK);
 	// run the order mux
-	omux_thread = new boost::thread(boost::bind(&OrderMux::run, ptr_order_mux));
+	omux_thread = new boost::thread(boost::bind(&capk::OrderMux::run, ptr_order_mux));
 #ifdef LOG
     pan::log_DEBUG("Sleeping 2");
 #endif
@@ -421,7 +420,7 @@ init()
     }
 
    	// send helo msg to each exchange we're connecting to
-	snd_HELO(pOEInterface, sid, capk::kFXCM_VENUE_ID); 
+    capk::snd_HELO(pOEInterface, sid, capk::kFXCM_VENUE_ID); 
 	//snd_HELO(pOEInterface, sid, kXCDE_VENUE_ID); 
   
  
@@ -430,11 +429,11 @@ init()
     // MARKET DATA INTERFACE SETUP
     ///////////////////////////////////////////////////////////////////////////
     // create the market data mux
-    ptr_market_data_mux = new MarketDataMux(&ctx, 
+    ptr_market_data_mux = new capk::MarketDataMux(&ctx, 
                         MD_MUX);
     // TODO differentiate between bbo stream and depth
-    ClientMarketDataInterface* ptr_agg_book_md_interface = 
-            new ClientMarketDataInterface(capk::kCAPK_VENUE_ID, 
+    capk::ClientMarketDataInterface* ptr_agg_book_md_interface = 
+            new capk::ClientMarketDataInterface(capk::kCAPK_VENUE_ID, 
                                 &ctx,
                                 capk::kCAPK_AGGREGATED_BOOK_MD_INTERFACE_ADDR,
                                 MD_MUX);
@@ -443,7 +442,7 @@ init()
     addOK = ptr_market_data_mux->addMarketDataInterface(ptr_agg_book_md_interface);
     assert(addOK);
     // run the market data mux
-    mdmux_thread = new boost::thread(boost::bind(&MarketDataMux::run, ptr_market_data_mux));
+    mdmux_thread = new boost::thread(boost::bind(&capk::MarketDataMux::run, ptr_market_data_mux));
 #ifdef LOG
     pan::log_DEBUG("Sleeping 2");
 #endif
@@ -524,7 +523,11 @@ main(int argc, char **argv)
         };
         // start the polling loop
         while (1 && s_interrupted != 1) {
-            //pan::log_DEBUG("Polling pair sockets in app thread");
+            /* N.B
+             * DO NOT USE THE C++ version of poll since this will throw
+             * an exception when the spurious EINTR is returned. Simply
+             * check for it here, trap it, and move on.
+             */
             //retOK = zmq::poll(pollItems, 2, -1);
             retOK = zmq_poll(pollItems, 2, -1);
             if (retOK == -1 && zmq_errno() == EINTR) {
@@ -537,7 +540,7 @@ main(int argc, char **argv)
             }
             else if (pollItems[1].revents && ZMQ_POLLIN) {
                 //pan::log_DEBUG("RECEIVING ORDER DATA");
-                receiveOrder(pOEInterface);
+                capk::receiveOrder(pOEInterface);
             }
         }
     }
@@ -556,13 +559,12 @@ main(int argc, char **argv)
         bool shouldPrompt = true;;
         int ret = -1; 
         while (1 && s_interrupted != 1) {
-            //pan::log_DEBUG("APP Polling pair sockets in app thread");
-            //zmq::poll(pollItems, 2, -1);
             /* N.B
              * DO NOT USE THE C++ version of poll since this will throw
              * an exception when the spurious EINTR is returned. Simply
              * check for it here, trap it, and move on.
              */
+            //zmq::poll(pollItems, 2, -1);
             ret = zmq_poll(pollItems, 2, -1);
             if (ret == -1 && zmq_errno() == EINTR) {
                 pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
@@ -576,7 +578,7 @@ main(int argc, char **argv)
 
             if (pollItems[0].revents && ZMQ_POLLIN) {
                 //pan::log_DEBUG("RECEIVING ORDER DATA");
-                receiveOrder(pOEInterface);
+                capk::receiveOrder(pOEInterface);
             }
             if (pollItems[1].revents && ZMQ_POLLIN) {
                 char action;
@@ -621,7 +623,7 @@ main(int argc, char **argv)
                 }
                 case 'l': 
                 {
-                    list_orders();
+                    capk::list_orders();
                     break;
                 }
                 default: 

@@ -6,7 +6,10 @@
 #include <string>
 
 #include "client_order_interface.h"
-#include "logging.h"
+
+#include "utils/logging.h"
+
+namespace capk {
 
 const size_t MAX_ORDER_ENTRY_INTERFACES = 10;
 
@@ -40,5 +43,6 @@ class OrderMux
 		
 
 };
+}; // namespace capk
 
 #endif // __ORDER_MUX__
