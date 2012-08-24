@@ -207,7 +207,6 @@ class Strategy:
     poller.register(md_socket, zmq.POLLIN)
     for order_socket in self.order_sockets.values():
       poller.register(order_socket, zmq.POLLIN)
-<<<<<<< HEAD
       while True:
         ready_sockets = poller.poll()
         for (socket, state) in ready_sockets:
@@ -228,25 +227,3 @@ class Strategy:
               tag = int_from_bytes(tag) 
               self.order_manager.received_message_from_order_engine(tag, msg)
         place_orders(order_manager)
-=======
-    while True:
-      ready_sockets = poller.poll(5)
-      for (socket, state) in ready_sockets:
-        # ignore errors for now
-        if state == zmq.POLLERR:
-          print "POLLERR on socket", socket, "md socket = ", self.md_socket, \
-            "order sockets = ", self.order_sockets 
-          #print msg 
-        elif state == zmq.POLLIN:
-          if socket == md_socket:
-            
-            bbo = spot_fx_md_1_pb2.instrument_bbo()
-            msg = md_socket.recv()
-            bbo.ParseFromString(msg)
-            md_update(bbo)
-          else:
-            [tag, msg] = socket.recv_multipart()
-            tag = int_from_bytes(tag) 
-            self.order_manager.received_message_from_order_engine(tag, msg)
-      place_orders()
->>>>>>> 7a1f6f274ee1ca0e121788746cf4089fba58b2cd
