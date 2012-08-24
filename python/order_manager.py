@@ -392,6 +392,7 @@ class OrderManager:
     logging.info("Sending cancel for %s", uuid_str(order_id))
     assert order_id in self.orders, "Unknown order %s" % uuid_str(order_id)
     assert order_id in self.live_order_ids, "Can't cancel dead order %s" % uuid_str(order_id)
+ 
     order = self.orders[order_id]
     request_id = fresh_id()
     self.orders[request_id] = order 

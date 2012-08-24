@@ -116,8 +116,9 @@ def new_order_dialog():
   else:
     venue = int(venue_str)
   action_window.addstr(6,5, "Symbol [%s]:" % default_symbol)
-  symbol = action_window.getstr(6, 25).strip()
-  if len(symbol) == 0: symbol = default_symbol 
+  symbol = action_window.getstr(6, 25).strip().upper()
+  if len(symbol) == 0: 
+    symbol = default_symbol 
   default_side_str = random.choice(['bid', 'ask'])
   action_window.addstr(8,5, "Side [%s]:" % default_side_str)
   side_str = action_window.getstr(8, 25).strip()

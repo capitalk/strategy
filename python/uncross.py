@@ -123,7 +123,7 @@ def close_unbalanced_cross(bigger, smaller):
       "Why did you call close_unbalanced_cross if there's no fill difference?"
     cross.rescue_order_id = \
       order_manager.send_new_order(venue, symbol, side, price, qty_diff)
-    
+  logging.info("Rescue order: %s", order_manager.get_order(cross.rescue_order_id))  
   
 def kill_cross():
   """
@@ -171,12 +171,14 @@ def manage_active_cross(max_order_lifetime):
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
     order = order_manager.get_order(cross.rescue_order_id)
-    logging.info("Rescue order: %s", order)
+    # logging.info("Rescue order: %s", order)
     assert order_manager.is_alive(order.id) or order.filled_qty == order.qty, \
       """Shit! If our hedge orders don't get filled this could turn into an
          infinite loop of order placement. Better just quit and handle 
          this situation manually.
       """
+    sys.stdout.write('r')
+    sys.stdout.flush()
   elif time.time() >= cross.send_time + max_order_lifetime: 
     # expired!
     kill_cross()
