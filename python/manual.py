@@ -3,9 +3,10 @@ from os import system
 import curses
 from market_data import MarketData, Entry
 from strategy_loop import Strategy 
+from order_manager import BID, ASK
 import sys 
 import atexit 
-
+import random 
 
 STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e023'  
 md = MarketData()
@@ -101,9 +102,9 @@ def new_order_dialog():
   action_window.addstr(2,3, "New")
   bids = md.collect_best_bids()
   bid_symbols = bids.keys()
-      
-  assert len(bid_symbols) > 0
-  default_symbol = bid_symbols[0]
+  n = len(bid_symbols) 
+  assert n > 0
+  default_symbol = bid_symbols[random.randint(0, n)]
   default_venue = bids[default_symbol].venue
   default_price = bids[default_symbol].price
   default_size = bids[default_symbol].size 
@@ -117,12 +118,15 @@ def new_order_dialog():
   action_window.addstr(6,5, "Symbol [%s]:" % default_symbol)
   symbol = action_window.getstr(6, 25).strip()
   if len(symbol) == 0: symbol = default_symbol 
-  action_window.addstr(8,5, "Side [bid]:")
+  default_side_str = random.choice(['bid', 'ask'])
+  action_window.addstr(8,5, "Side [%s]:" % default_side_str)
   side_str = action_window.getstr(8, 25).strip()
   if len(side_str) == 0:
-    side = 0
+    side_str = default_side_str
+  if side_str in [str(ASK), 'a', 'ask', 'A', 'o', 'offer', 'O']:
+    side = ASK
   else:
-    side = side_str in ['1', 'a', 'ask', 'A', 'o', 'offer', 'O']
+    side = BID
       
   action_window.addstr(10,5, "Price [%s]:"% default_price)
   price_str = action_window.getstr(10, 25).strip()
@@ -183,5 +187,5 @@ if __name__ == '__main__':
   order_manager = strategy.connect(args.config_server)
   #atexit.register(strategy.close_all)
   init_ui()
-  strategy.run(md.update, ui_update)
+  strategy.run(lambda bbo: md.update(bbo, False), ui_update)
 
