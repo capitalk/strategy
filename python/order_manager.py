@@ -290,11 +290,11 @@ class OrderManager:
   def _handle_cancel_reject(self, cr):
     order_id = cr.cl_order_id  
     orig_id = cr.orig_cl_order_id
-    logger.warning("Cancel reject: order_id = %s, orig_id = %s", 
-      uuid_str(order_id), uuid_str(orig_id))
+    logger.warning("Cancel reject: order_id = %s, orig_id = %s, reason =%s", 
+      uuid_str(order_id), uuid_str(orig_id), cr.cancel_reject_reason)
     assert orig_id in self.orders, \
       "Cancel reject for unknown original order ID %s" % uuid_str(orig_id)
-    order = self.get(orig_id)
+    order = self.get_order(orig_id)
     if order_id in order.pending_ids:
       order.pending_id_rejected(order_id)
     else:
@@ -349,8 +349,8 @@ class OrderManager:
     pb.handl_inst = HANDLING_INSTRUCTION.AUTOMATED_INTERVENTION_OK
     pb.symbol = order.symbol
     pb.side = order.side 
-    pb.order_qty = order.qty 
-    pb.price = order.price 
+    pb.order_qty = qty 
+    pb.price = price 
     pb.transact_time = datetime.datetime.utcnow().strftime('%Y%M%D-%H:%M:%S')
     pb.ord_type = order.order_type
     pb.time_in_force = order.time_in_force

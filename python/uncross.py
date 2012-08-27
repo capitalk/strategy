@@ -6,7 +6,7 @@ from strategy_loop import Strategy
 from proto_objs.capk_globals_pb2 import BID, ASK
 from logging_helpers import create_logger
 
-logger = create_logger("uncrosser", logging.INFO, "uncrosser.log", logging.INFO)
+logger = create_logger("uncross", logging.INFO, "uncross.log", logging.INFO)
 
 
 
@@ -178,22 +178,32 @@ def both_dead(bid, offer):
     cross = None
       
 def manage_active_cross(max_order_lifetime):
+  global cross
   if cross.rescue_order_id:
+    
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
     order = order_manager.get_order(cross.rescue_order_id)
-    # logger.info("Rescue order: %s", order)
-    assert order_manager.is_alive(order.id) or order.filled_qty == order.qty, \
-      """Shit! If our hedge orders don't get filled this could turn into an
-         infinite loop of order placement. Better just quit and handle 
-         this situation manually.
-      """
-    sys.stdout.write('r')
-    sys.stdout.flush()
+    rescue_pending = cross.rescue_order_id in order.pending_ids 
+    rescue_alive = order_manager.is_alive(cross.rescue_order_id)
+    rescue_dead = not (rescue_pending or rescue_alive)
+    rescue_expired = time.time() - order.rescue_start_time >= 5
+    # if the order is filled, or the rescue has expired, 
+    # or rescue order has died, give up on it!
+    if order.filled_qty == order.qty:
+      logging.info("Rescue succeeded: %s" % cross.rescue_order_id)
+      cross = None
+    elif rescue_dead or rescue_expired: 
+      logging.info("Rescue failed: %s" % cross.rescue_order_id)
+      cross.rescue_order_id = None
+    else:
+      sys.stdout.write('r')
+      sys.stdout.flush()
   elif time.time() >= cross.send_time + max_order_lifetime: 
     # expired!
     kill_cross()
   else:
+    
     bid_id = cross.bid_order_id
     bid_alive = order_manager.is_alive(bid_id)
     bid = order_manager.get_order(bid_id)
@@ -201,7 +211,6 @@ def manage_active_cross(max_order_lifetime):
     offer_id = cross.offer_order_id 
     offer_alive = order_manager.is_alive(offer_id)
     offer = order_manager.get_order(offer_id)
-    
     if not (bid_alive or offer_alive ): 
       both_dead(bid, offer)
     elif bid_alive and offer_alive:
