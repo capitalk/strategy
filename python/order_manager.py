@@ -14,6 +14,22 @@ from proto_objs.new_order_single_pb2 import new_order_single
 from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
 import logging 
 
+logger = logging.getLogger('order_manager')
+logger.setLevel(logging.DEBUG)
+# create file handler which logs even debug messages
+fh = logging.FileHandler('order_manager.log')
+fh.setLevel(logging.DEBUG)
+# create console handler with a higher log level
+ch = logging.StreamHandler()
+ch.setLevel(logging.ERROR)
+
+# create formatter and add it to the handlers
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+fh.setFormatter(formatter)
+# add the handlers to logger
+logger.addHandler(ch)
+logger.addHandler(fh)
 
 """
 There are lots of complicated state transitions in the lifetime of an order 
@@ -78,9 +94,9 @@ class Order:
     
   def pending_id_accepted(self, pending_id):
     assert pending_id in self.pending_ids, \
-      "Unexpected pending ID %s for order %s" % \
+      "Unexpected pending ID s for order %s" % \
       (uuid_str(pending_id), uuid_str(self.id))
-    self.id = self.pending_id
+    self.id = pending_id
     self.pending_ids.remove(pending_id)
 
   def pending_id_rejected(self, pending_id):
@@ -207,7 +223,7 @@ class OrderManager:
     filled_qty = er.cum_qty 
     unfilled_qty = er.leaves_qty
     
-    logging.info("Exec Report: order_id = %s, orig_id = %s, status = %s, exec_type = %s", 
+    logger.info("Exec Report: order_id = %s, orig_id = %s, status = %s, exec_type = %s", 
       uuid_str(order_id), uuid_str(original_order_id), EXEC_TYPE.to_str(status), 
       EXEC_TYPE.to_str(exec_type))     
 
@@ -248,7 +264,7 @@ class OrderManager:
         order.pending_id_accepted(order_id)
       elif exec_type in [EXEC_TYPE.CANCELLED,  EXEC_TYPE.REPLACE]:
         if order_id not in order.pending_ids:
-          logging.warning("Unsolicited %s of %s", EXEC_TYPE.to_str(exec_type), uuid_str(original_order_id))
+          logger.warning("Unsolicited %s of %s", EXEC_TYPE.to_str(exec_type), uuid_str(original_order_id))
         else:
           assert original_order_id in self.live_order_ids   
           self._rename(original_order_id, order_id)
@@ -267,14 +283,14 @@ class OrderManager:
       if order_id in self.live_order_ids:
         self.live_order_ids.remove(order_id)
       elif transaction_type == EXEC_TRANS_TYPE.NEW:
-        logging.warning("Order %s should have been alive before entering terminal state %s", 
+        logger.warning("Order %s should have been alive before entering terminal state %s", 
           uuid_str(order_id), ORDER_STATUS.to_str(status))
   
   
   def _handle_cancel_reject(self, cr):
     order_id = cr.cl_order_id  
     orig_id = cr.orig_cl_order_id
-    logging.warning("Cancel reject: order_id = %s, orig_id = %s", 
+    logger.warning("Cancel reject: order_id = %s, orig_id = %s", 
       uuid_str(order_id), uuid_str(orig_id))
     assert orig_id in self.orders, \
       "Cancel reject for unknown original order ID %s" % uuid_str(orig_id)
@@ -282,7 +298,7 @@ class OrderManager:
     if order_id in order.pending_ids:
       order.pending_id_rejected(order_id)
     else:
-      logging.warning("Got unexepcted cancel rejection")
+      logger.warning("Got unexepcted cancel rejection")
       
   def received_message_from_order_engine(self, tag, msg):
     if tag == order_engine_constants.EXEC_RPT:
@@ -356,7 +372,7 @@ class OrderManager:
     tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, order_id, bytes])
-    logging.info("Sent new order to %s: %s", venue, order)
+    logger.info("Sent new order to %s: %s", venue, order)
     return order_id
  
   def send_cancel_replace(self, order_id, price, qty):
@@ -379,14 +395,14 @@ class OrderManager:
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
 
-    logging.info(\
+    logger.info(\
      "Sent cancel/replace to %s: orig_id = %s, new_id = %s, price = %s, qty= %s", 
      venue, uuid_str(order_id), uuid_str(request_id), price, qty)
     return request_id
     
   def send_cancel(self, order_id):
     #print "Attempting to cancel order %s" % order_id
-    logging.info("Sending cancel for %s", uuid_str(order_id))
+    logger.info("Sending cancel for %s", uuid_str(order_id))
     assert order_id in self.orders, "Unknown order %s" % uuid_str(order_id)
     assert order_id in self.live_order_ids, "Can't cancel dead order %s" % uuid_str(order_id)
  
@@ -400,7 +416,7 @@ class OrderManager:
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue]
     socket.send_multipart([tag, self.strategy_id, request_id, bytes])
-    logging.info("Sent cancel: order_id = %s orig_id = %s", 
+    logger.info("Sent cancel: order_id = %s orig_id = %s", 
       uuid_str(request_id), uuid_str(order_id))
     return request_id
   
@@ -427,7 +443,7 @@ class OrderManager:
        replaces all open orders with significantly worse prices
        likely to transact  """
    
-    logging.info("Attempting to liquidate all %d open orders", len(self.live_order_ids))
+    logger.info("Attempting to liquidate all %d open orders", len(self.live_order_ids))
     request_ids = []
     for order_id in self.live_order_ids:
       request_id = self.liquidate_order(md, order_id)

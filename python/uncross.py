@@ -1,11 +1,15 @@
 import time 
-import logging 
+import logging
 import sys 
 from market_data import MarketData 
 from strategy_loop import Strategy 
 from proto_objs.capk_globals_pb2 import BID, ASK
+from logging_helpers import create_logger
 
-logging.basicConfig(level=logging.INFO)
+logger = create_logger("uncrosser", logging.INFO, "uncrosser.log", logging.INFO)
+
+
+
 STRATEGY_ID = 'f1056929-073f-4c62-8b03-182d47e5e022'
 md = MarketData()
 # we get an order_manager back from Strategy.connect
@@ -30,7 +34,12 @@ class Cross:
     # to get out of the position 
 
     self.rescue_order_id = None
-    
+    self.rescue_start_time = None 
+
+  def set_rescue_order_id(self, rid): 
+    self.rescue_order_id = rid
+    self.rescue_start_time = time.time()
+
   def send(self):
     assert not self.sent, "Can't sent the same cross twice"
     # send the damn thing 
@@ -60,9 +69,9 @@ class Cross:
     ready_to_send = self.start_time + wait_time >= time.time()
     if ready_to_send: 
       self.send()
-      logging.info("Sent orders for %s",  self)
+      logger.info("Sent orders for %s",  self)
     else:
-      logging.info("Waiting to send orders for %s", self)
+      logger.info("Waiting to send orders for %s", self)
     
   
   def __str__(self):
@@ -93,13 +102,13 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
         else:
           cross_size = min(bid_entry.size, offer_entry.size)
           cross_magnitude = price_difference * cross_size
-          logging.info("Cross found: %s %d @ %s", symbol, cross_size, cross_magnitude)
+          logger.info("Cross found: %s %d @ %s", symbol, cross_size, cross_magnitude)
           if yen_pair: cross_magnitude /= 80
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid_entry = bid_entry, offer_entry = offer_entry)
             best_cross_magnitude = cross_magnitude 
   if best_cross is not None:
-    logging.info("Best cross: %s", best_cross)
+    logger.info("Best cross: %s", best_cross)
     if best_cross_magnitude < min_cross_magnitude: 
       best_cross = None
   updated_symbols.clear()
@@ -109,21 +118,23 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
 def close_unbalanced_cross(bigger, smaller):
   order_manager.cancel_if_alive(bigger.id)
   if order_manager.is_alive(smaller.id):
-    cross.rescue_order_id = \
-      order_manager.liquidate_order(md, smaller.id, bigger.filled_qty)
+    rescue_id = order_manager.liquidate_order(md, smaller.id, bigger.filled_qty)
+    cross.set_rescue_order_id(rescue_id)
   else:
     side, symbol, venue = smaller.side, smaller.symbol, smaller.venue
     # none of the smaller side's IDs are alive, so we need to put in a new order
-    logging.info(\
+    logger.info(\
       "Dead order for %s on %s (side = %s, %d) needs %s",
        symbol, venue, side, smaller.filled_qty, bigger.filled_qty)
     price = md.liquidation_price(side, symbol, venue)
     qty_diff = bigger.filled_qty - smaller.filled_qty 
     assert qty_diff > 0, \
       "Why did you call close_unbalanced_cross if there's no fill difference?"
-    cross.rescue_order_id = \
+    rescue_id = \
       order_manager.send_new_order(venue, symbol, side, price, qty_diff)
-  logging.info("Rescue order: %s", order_manager.get_order(cross.rescue_order_id))  
+    cross.set_rescue_order_id(rescue_id)
+
+  logger.info("Rescue order: %s", order_manager.get_order(cross.rescue_order_id))  
   
 def kill_cross():
   """
@@ -154,7 +165,7 @@ def both_dead(bid, offer):
      are unevenly filled
   """
   global cross 
-  logging.info ("Both sides dead")
+  logger.info ("Both sides dead")
   if bid.filled_qty > offer.filled_qty:
     close_unbalanced_cross(bid, offer)   
   elif bid.filled_qty < offer.filled_qty:
@@ -162,7 +173,7 @@ def both_dead(bid, offer):
   else:
     price_delta = offer.price - bid.price 
     profit = bid.filled_qty * price_delta 
-    logging.info("Cross completed! Profit = %s %s",
+    logger.info("Cross completed! Profit = %s %s",
      profit,  bid.symbol)
     cross = None
       
@@ -171,7 +182,7 @@ def manage_active_cross(max_order_lifetime):
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
     order = order_manager.get_order(cross.rescue_order_id)
-    # logging.info("Rescue order: %s", order)
+    # logger.info("Rescue order: %s", order)
     assert order_manager.is_alive(order.id) or order.filled_qty == order.qty, \
       """Shit! If our hedge orders don't get filled this could turn into an
          infinite loop of order placement. Better just quit and handle 
@@ -194,25 +205,25 @@ def manage_active_cross(max_order_lifetime):
     if not (bid_alive or offer_alive ): 
       both_dead(bid, offer)
     elif bid_alive and offer_alive:
-      #logging.info("Both orders alive for %s, bid filled = %d, ask filled = %d",
+      #logger.info("Both orders alive for %s, bid filled = %d, ask filled = %d",
       #  bid.symbol, bid.filled_qty, offer.filled_qty)  
       sys.stdout.write("-")
       sys.stdout.flush()
     elif bid_alive and offer.filled_qty < offer.qty:
       # offer is dead with a partial fill 
-      logging.info("Bid alive, offer dead with %d/%d filled", 
+      logger.info("Bid alive, offer dead with %d/%d filled", 
         offer.filled_qty, offer.qty)
       kill_cross()
     elif offer_alive and bid.filled_qty < bid.qty:
       # bid is dead with a partial fill 
-      logging.info("Offer alive, bid dead with %d/%d filled", 
+      logger.info("Offer alive, bid dead with %d/%d filled", 
         offer.filled_qty, offer.qty)
       kill_cross()
     else:
       # only one side alive, waiting for a fill on the other side 
       sys.stdout.write('!')
       sys.stdout.flush()
-      #logging.info("Still waiting for a fill (bid %d/%d, offer %d/%d)", 
+      #logger.info("Still waiting for a fill (bid %d/%d, offer %d/%d)", 
       #  bid.filled_qty, bid.qty, offer.filled_qty, offer.qty)
     
 

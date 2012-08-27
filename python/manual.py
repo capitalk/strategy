@@ -97,6 +97,7 @@ def dialog(fn, *args, **kwds):
     fn(*args, **kwds)
     action_window.timeout(250)
   return nested 
+
 @dialog
 def new_order_dialog():
   action_window.addstr(2,3, "New")
