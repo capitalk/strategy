@@ -45,7 +45,6 @@ class Cross:
     # send the damn thing 
     bid_entry = self.bid_entry
     offer_entry = self.offer_entry
-    qty = min(bid_entry.size, offer_entry.size)
     assert offer_entry.price < bid_entry.price, \
       "Isn't this supposed to be an uncrosser? offer %s not less than bid %s " % \
       (offer_entry.price, bid_entry.price)
@@ -55,11 +54,24 @@ class Cross:
       (bid_entry.symbol, offer_entry.symbol)
     # NB: Send a BID order to transact with the offer in the order book
     # and vice versa (send an ASK to transact with the available bid)
-    self.bid_order_id = \
-      order_manager.send_new_order(offer_entry.venue, symbol, BID, offer_entry.price, qty)
-    self.offer_order_id = \
-      order_manager.send_new_order(bid_entry.venue, symbol, ASK, bid_entry.price, qty)
-    
+    #
+    # Send an order for the smaller, and  presumably more transient, side first 
+    if bid_entry.size < offer_entry.size:
+      smaller_qty = bid_entry.size
+      self.offer_order_id = \
+        order_manager.send_new_order(bid_entry.venue, symbol, ASK, 
+          bid_entry.price, smaller_qty)
+      self.bid_order_id = \
+        order_manager.send_new_order(offer_entry.venue, symbol, BID, 
+          offer_entry.price, smaller_qty)
+    else:
+      smaller_qty = offer_entry.size
+      self.bid_order_id = \
+        order_manager.send_new_order(offer_entry.venue, symbol, BID, 
+          offer_entry.price, offer_entry.size)
+      self.offer_order_id = \
+        order_manager.send_new_order(bid_entry.venue, symbol, ASK, 
+          bid_entry.price, smaller_qty)
     self.send_time = time.time()
     self.sent = True
   
@@ -115,6 +127,7 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
 
 def close_unbalanced_cross(bigger, smaller):
   order_manager.cancel_if_alive(bigger.id)
+  logging.info("Close unbalanced cross, bigger = %s, smaller = %s", bigger, smaller)
   if order_manager.is_alive(smaller.id):
     rescue_id = order_manager.liquidate_order(md, smaller.id, bigger.filled_qty)
     cross.set_rescue_order_id(rescue_id)
@@ -130,8 +143,8 @@ def close_unbalanced_cross(bigger, smaller):
       "Why did you call close_unbalanced_cross if there's no fill difference?"
     rescue_id = \
       order_manager.send_new_order(venue, symbol, side, price, qty_diff)
+    logger.info("Liquidation qty = %d, price = %s", qty_diff, price)
     cross.set_rescue_order_id(rescue_id)
-
   logger.info("Rescue order: %s", order_manager.get_order(cross.rescue_order_id))  
   
 def kill_cross():
@@ -149,7 +162,8 @@ def kill_cross():
   ask = order_manager.get_order(cross.offer_order_id)
   bid_qty = bid.filled_qty
   ask_qty = ask.filled_qty
-  
+  logger.info('Kill cross with bid filled qty = %d, ask filled qty = %d', 
+    bid_qty, ask_qty) 
   if bid.filled_qty == ask.filled_qty:
     order_manager.cancel_if_alive(bid.id)
     order_manager.cancel_if_alive(ask.id)
@@ -163,7 +177,6 @@ def both_dead(bid, offer):
      are unevenly filled
   """
   global cross 
-  logger.info ("Both sides dead")
   if bid.filled_qty > offer.filled_qty:
     close_unbalanced_cross(bid, offer)   
   elif bid.filled_qty < offer.filled_qty:
@@ -190,22 +203,21 @@ def manage_active_cross(max_order_lifetime):
     order = order_manager.get_order(cross.rescue_order_id)
     rescue_pending = cross.rescue_order_id in order.pending_ids 
     rescue_alive = order_manager.is_alive(cross.rescue_order_id)
-    rescue_dead = not (rescue_pending or rescue_alive)
-    rescue_expired = time.time() - order.rescue_start_time >= 5
+    # rescue_dead = not (rescue_pending or rescue_alive)
+    rescue_expired = time.time() - cross.rescue_start_time >= 10
     # if the order is filled, or the rescue has expired, 
     # or rescue order has died, give up on it!
     if order.filled_qty == order.qty:
-      logging.info("Rescue succeeded: %s" % cross.rescue_order_id)
+      logger.info("Rescue succeeded: %s" % cross.rescue_order_id)
       
       cross = None
-    elif rescue_dead or rescue_expired: 
-      logging.info("Rescue failed: %s" % cross.rescue_order_id)
-      cross.rescue_order_id = None
     else:
+      assert (rescue_pending or rescue_alive) and not rescue_expired, \
+      "Rescue failed: %s" % order 
       sys.stdout.write('r')
       sys.stdout.flush()
   elif time.time() >= cross.send_time + max_order_lifetime: 
-    # expired!
+    logger.info('Cross expired')
     kill_cross()
   else:
     
@@ -217,10 +229,12 @@ def manage_active_cross(max_order_lifetime):
     offer_alive = order_manager.is_alive(offer_id)
     offer = order_manager.get_order(offer_id)
     if not (bid_alive or offer_alive ): 
+      logger.info('Both orders dead')
       both_dead(bid, offer)
     elif bid_alive and offer_alive:
       #logger.info("Both orders alive for %s, bid filled = %d, ask filled = %d",
       #  bid.symbol, bid.filled_qty, offer.filled_qty)  
+     
       sys.stdout.write("-")
       sys.stdout.flush()
     elif bid_alive and offer.filled_qty < offer.qty:
@@ -283,6 +297,7 @@ if __name__ == '__main__':
       args.order_delay, 
       args.max_order_lifetime, 
       args.max_order_qty)
+  logger.info('Started')
   strategy.run(md_update_wrapper, place_orders)
-  
+  logger.info('Stopped')
   
