@@ -46,21 +46,19 @@ class Cross:
     bid_entry = self.bid_entry
     offer_entry = self.offer_entry
     qty = min(bid_entry.size, offer_entry.size)
-    low = offer_entry.price
-    high = bid_entry.price
-    assert low < high, \
+    assert offer_entry.price < bid_entry.price, \
       "Isn't this supposed to be an uncrosser? offer %s not less than bid %s " % \
-      (low, high)
+      (offer_entry.price, bid_entry.price)
     symbol = bid_entry.symbol 
     assert symbol == offer_entry.symbol, \
       "Can't uncross two different symbols! (%s, %s)" % \
       (bid_entry.symbol, offer_entry.symbol)
     # NB: Send a BID order to transact with the offer in the order book
     # and vice versa (send an ASK to transact with the available bid)
-    bid_id = order_manager.send_new_order(bid_entry.venue, symbol, ASK, low, qty)
-    self.bid_order_id = bid_id
-    offer_id = order_manager.send_new_order(offer_entry.venue, symbol, BID, high, qty)
-    self.offer_order_id = offer_id 
+    self.bid_order_id = \
+      order_manager.send_new_order(offer_entry.venue, symbol, BID, offer_entry.price, qty)
+    self.offer_order_id = \
+      order_manager.send_new_order(bid_entry.venue, symbol, ASK, bid_entry.price, qty)
     
     self.send_time = time.time()
     self.sent = True
@@ -170,11 +168,17 @@ def both_dead(bid, offer):
     close_unbalanced_cross(bid, offer)   
   elif bid.filled_qty < offer.filled_qty:
     close_unbalanced_cross(offer, bid)
+  elif bid.filled_qty == 0:
+    assert offer.filled_qty == 0
+    logger.info("Cross died without any fills")
+    cross = None
   else:
-    price_delta = offer.price - bid.price 
-    profit = bid.filled_qty * price_delta 
-    logger.info("Cross completed! Profit = %s %s",
-     profit,  bid.symbol)
+    assert offer.avg_price is not None
+    assert bid.avg_price is not None
+    expected_profit = bid.filled_qty * (offer.price - bid.price)
+    profit = bid.filled_qty * (offer.avg_price - bid.avg_price)
+    logger.info("Cross completed! Profit expected %s, got %s %s",
+     expected_profit, profit, bid.symbol)
     cross = None
       
 def manage_active_cross(max_order_lifetime):
@@ -192,6 +196,7 @@ def manage_active_cross(max_order_lifetime):
     # or rescue order has died, give up on it!
     if order.filled_qty == order.qty:
       logging.info("Rescue succeeded: %s" % cross.rescue_order_id)
+      
       cross = None
     elif rescue_dead or rescue_expired: 
       logging.info("Rescue failed: %s" % cross.rescue_order_id)

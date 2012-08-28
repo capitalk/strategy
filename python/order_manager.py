@@ -83,7 +83,7 @@ class Order:
     self.filled_qty = 0
     # will change to full qty if order is accepted
     self.unfilled_qty = 0
-    
+    self.avg_price = None 
     # fill this in when we get ack back from exchange
     self.status = None
     
@@ -180,7 +180,7 @@ class OrderManager:
     order = self._rename(order_id, cancel_id)
     order.set_status(ORDER_STATUS.CANCELLED)
     
-  def _update_order(self, order, price, qty, filled_qty, unfilled_qty, status):
+  def _update_order(self, order, price, qty, filled_qty, unfilled_qty, avg_price, status):
   
     changed = False
     if order.price != price:
@@ -192,7 +192,9 @@ class OrderManager:
     if order.unfilled_qty != unfilled_qty:
       order.unfilled_qty = unfilled_qty 
       changed = True
-    
+    if avg_price and avg_price > 0 and order.avg_price != avg_price:
+      order.avg_price = avg_price
+      changed = True
     if order.filled_qty != filled_qty:
       old_filled = order.filled_qty 
       old_pos = self.positions.get(order.symbol, 0) 
@@ -222,7 +224,8 @@ class OrderManager:
     qty = er.order_qty
     filled_qty = er.cum_qty 
     unfilled_qty = er.leaves_qty
-    
+    avg_price = er.avg_price 
+ 
     logger.info("Exec Report: order_id = %s, orig_id = %s, status = %s, exec_type = %s", 
       uuid_str(order_id), uuid_str(original_order_id), EXEC_TYPE.to_str(status), 
       EXEC_TYPE.to_str(exec_type))     
@@ -255,7 +258,7 @@ class OrderManager:
       "Unknown order id = %s, price = %f, qty = %s, filled = %s" % \
       (uuid_str(order_id), price, qty, filled_qty)
     order = self.get_order(original_order_id)
-    self._update_order(order, price, qty, filled_qty, unfilled_qty, status)
+    self._update_order(order, price, qty, filled_qty, unfilled_qty, avg_price, status)
     
     # It's possible to get unsolicited cancels and replaces, in which case
     # there is only order_id and an undefined value in original_order_id
