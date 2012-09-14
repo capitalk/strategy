@@ -99,14 +99,14 @@ class OrderManager:
     
   def pending_id_accepted(self, order_id, pending_id):
     assert self.pending.has_value(pending_id), \
-      "Unexpected pending ID s for order %s" % \
+      "Unexpected pending ID %s for order %s" % \
       (uuid_str(pending_id), uuid_str(order_id))
     self.pending.remove_value(pending_id)
     self.get_order(order_id).id = pending_id
 
   def pending_id_rejected(self, order_id, pending_id):
     assert self.pending.has_value(pending_id), \
-      "Unexpected pending ID s for order %s" % \
+      "Unexpected pending ID %s for order %s" % \
       (uuid_str(pending_id), uuid_str(order_id))
     self.pending.remove_value(pending_id)
  

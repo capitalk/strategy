@@ -6,7 +6,10 @@ from strategy_loop import Strategy
 from proto_objs.capk_globals_pb2 import BID, ASK
 from logging_helpers import create_logger
 
-logger = create_logger("uncross", logging.INFO, "uncross.log", logging.INFO)
+logger = create_logger("uncross", 
+  console_level = logging.INFO, 
+  file_name = "uncross.log", 
+  file_level = logging.INFO)
 
 
 
