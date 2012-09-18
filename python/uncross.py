@@ -204,7 +204,7 @@ def manage_active_cross(max_order_lifetime):
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
     order = order_manager.get_order(cross.rescue_order_id)
-    rescue_pending = cross.rescue_order_id in order.pending_ids 
+    rescue_pending = order_manager.is_pending(cross.rescue_order_id)
     rescue_alive = order_manager.is_alive(cross.rescue_order_id)
     # rescue_dead = not (rescue_pending or rescue_alive)
     rescue_expired = time.time() - cross.rescue_start_time >= 10
