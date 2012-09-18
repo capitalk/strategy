@@ -311,7 +311,7 @@ class OrderManager:
        to the order engine.
     """
     pb = order_cancel()
-    pb.cl_order_id = request_id
+    pb.cl_order_id = request_id.bytes
     pb.orig_order_id = order.id.bytes
     pb.strategy_id = self.strategy_id
     pb.symbol = order.symbol
