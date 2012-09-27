@@ -115,7 +115,7 @@ class OrderManager:
  
   def is_pending(self, pending_id):
     return self.pending.has_value(pending_id)
- 
+
   def is_alive(self, order_id):
     return order_id in self.live_order_ids
     
@@ -351,8 +351,8 @@ class OrderManager:
     
     
   def send_new_order(self, venue, symbol, side, price, qty, order_type = LIM, time_in_force = GFD):
-    #print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
-    #  (venue, symbol, side, price, qty)
+    print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
+      (venue, symbol, side, price, qty)
     
     order_id = fresh_id()
     order = Order(order_id, venue, symbol, side, price, qty, 
@@ -372,6 +372,7 @@ class OrderManager:
  
   def send_cancel_replace(self, order_id, price, qty):
     #print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
+    logger.info("Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty))
     assert order_id in self.orders
     assert order_id in self.live_order_ids
     order = self.orders[order_id]

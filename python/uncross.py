@@ -110,7 +110,7 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
     for bid_entry in sorted_bids:
       for offer_entry in sorted_offers:
         price_difference = bid_entry.price - offer_entry.price
-        if price_difference < 0: 
+        if price_difference <= 0: 
           break
         else:
           cross_size = min(bid_entry.size, offer_entry.size)
@@ -129,8 +129,8 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
 
 
 def close_unbalanced_cross(bigger, smaller):
-  order_manager.cancel_if_alive(bigger.id)
   logging.info("Close unbalanced cross, bigger = %s, smaller = %s", bigger, smaller)
+  order_manager.cancel_if_alive(bigger.id)
   if order_manager.is_alive(smaller.id):
     rescue_id = order_manager.liquidate_order(md, smaller.id, bigger.filled_qty)
     cross.set_rescue_order_id(rescue_id)
@@ -160,6 +160,7 @@ def kill_cross():
   NB: Optionally returns the ID of a hedge order which gets placed if 
   the sides have different fill amounts. 
   """
+  logging.info("kill_cross()")
   assert cross.sent, "Can't kill a cross before you send it"
   bid = order_manager.get_order(cross.bid_order_id) 
   ask = order_manager.get_order(cross.offer_order_id)
@@ -180,6 +181,7 @@ def both_dead(bid, offer):
      are unevenly filled
   """
   global cross 
+  logging.info("both_dead(", bid, offer, ")")
   if bid.filled_qty > offer.filled_qty:
     close_unbalanced_cross(bid, offer)   
   elif bid.filled_qty < offer.filled_qty:
@@ -199,6 +201,7 @@ def both_dead(bid, offer):
       
 def manage_active_cross(max_order_lifetime):
   global cross
+  logging.info("manage_active_cross(", max_order_lifetime, ")")
   if cross.rescue_order_id:
     
     # one order got rejected or some other weird situation which 
