@@ -351,7 +351,7 @@ class OrderManager:
     
     
   def send_new_order(self, venue, symbol, side, price, qty, order_type = LIM, time_in_force = GFD):
-    print "Attempting to create new order venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
+    print "Attempting to create new order: venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
       (venue, symbol, side, price, qty)
     
     order_id = fresh_id()
@@ -396,6 +396,31 @@ class OrderManager:
      venue, str(order_id), str(request_id), price, qty)
     return request_id
     
+  def send_synth_cancel_replace(self, order_id, price, qty):
+    logger.info("Attempting SYNTHETIC cancel/replace %s to price=%s qty=%s" % (order_id, price, qty))
+    assert order_id in self.orders
+    assert order_id in self.live_order_ids
+    order = self.orders[order_id]
+    assert order.price != price or order.qty != qty, \
+      "Trying to cancel/replace without changing anything for order %s" % \
+      str(order_id) 
+
+    # cancel the original order
+    cancel_request_id = self.send_cancel(order_id)
+
+    # send the new order with the modified price 
+    new_order_request_id = self.send_new_order(order.venue, order.symbol, order.side, price, qty)
+
+    logger.info(\
+     "Sent synthetic cancel/replace", 
+     "1) Sent cancel to %s: orig_id = %s, new_id = %s", 
+     (venue, str(order_id), str(cancel_request_id)))
+    logger.info(\
+     "2) Sent new order to %s: new_id = %s, price = %s, qty= %s", 
+     (venue, str(new_order_request_id), price, qty))
+    return new_order_request_id
+ 
+
   def send_cancel(self, order_id):
     #print "Attempting to cancel order %s" % order_id
     logger.info("Sending cancel for %s", str(order_id))
@@ -450,6 +475,7 @@ class OrderManager:
     order = self.get_order(order_id)
     qty = (qty if qty is not None else order.qty)
     price = md.liquidation_price(order.side, order.symbol, order.venue)
-    return self.send_cancel_replace(order.id, price = price, qty = qty)
+    #return self.send_cancel_replace(order.id, price = price, qty = qty)
+    return self.send_synth_cancel_replace(order.id, price = price, qty = qty)
     
     
