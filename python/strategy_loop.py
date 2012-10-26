@@ -7,7 +7,7 @@ import sys
 from proto_objs import spot_fx_md_1_pb2
 from proto_objs import venue_configuration_pb2
 from int_util import int_to_bytes, int_from_bytes 
-from order_manager import OrderManager
+from order_manager2 import OrderManager
 import order_engine_constants
 
 context = zmq.Context()

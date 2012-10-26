@@ -1,4 +1,4 @@
-
+from UserString import MutableString
 
 class OneToManyDict:
   """Like a dictionary, but every key maps to a 
@@ -18,7 +18,7 @@ class OneToManyDict:
 
   def add(self, k, v):
     import uuid
-    print "Adding", k, v 
+    print "Adding:[", k, v , "]"
     value_set = self.key_to_values.get(k, set([]))
     value_set.add(v)
     self.key_to_values[k] = value_set 
@@ -43,6 +43,9 @@ class OneToManyDict:
     k = self.get_key(v)
     value_set = self.key_to_values[k]
     value_set.remove(v)
+    # Comment next line to leave values in 
+    # the value_to_key array
+    del self.value_to_key[v]
    
   def has_key(self, k):
     return k in self.key_to_values
@@ -53,5 +56,16 @@ class OneToManyDict:
   def has_value(self, v):
     return v in self.value_to_key
    
+  def dbg_string(self):
+    dbg_string = MutableString()
+    dbg_string += "\nKEY TO VALUE:\n"
+    for k,v in self.key_to_values.items():
+        dbg_string += ("\t%s => %s\n") % (k, v)
+    dbg_string += "VALUE TO KEY:\n"
+    for v,k in self.value_to_key.items():
+        dbg_string += ("\t%s => %s\n") % (v, k)
+    #print self.__str__()
+    return dbg_string
+
   def __str__(self):
     return "k2v: %s, v2k: %s" % (self.key_to_values, self.value_to_key) 

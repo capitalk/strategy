@@ -22,7 +22,7 @@ class MarketData:
 
     symbol, venue = bbo.symbol, bbo.bid_venue_id
     if venue == 0:
-      logging.warning("Venue ID was 0, changing to 890778")
+      logging.critical("Venue ID was 0, changing to 890778")
       venue = 890778
     bid_size, bid_price = bbo.bid_size, bbo.bid_price
     ask_size, ask_price = bbo.ask_size, bbo.ask_price

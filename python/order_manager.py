@@ -18,8 +18,9 @@ from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
 import logging
 from logging_helpers import create_logger 
 
-logger = create_logger('order_manager', file_name = 'order_manager.log', 
-  file_level = logging.DEBUG)
+#logger = create_logger('order_manager', file_name = 'order_manager.log', file_level = logging.DEBUG)
+
+logger = logging.getLogger('uncross')
 
 """
 There are lots of complicated state transitions in the lifetime of an order 
@@ -77,12 +78,13 @@ class Order:
  
 
   def __str__(self):
-    return "Order<id = %s, side = %s, price = %s, qty = %d>" % \
-      (str(self.id), self.side, self.price, self.qty)  
+    return "Order<id = %s, side = %s, price = %s, qty = %d, venue = %s, symbol= %s, filled_qty = %d, unfilled_qty = %d>" % \
+      (str(self.id), self.side, self.price, self.qty, self.venue, self.symbol, self.filled_qty, self.unfilled_qty) 
 
 class OrderManager:
   def __init__(self, strategy_id, order_sockets):
     """order_sockets maps venue ids to zmq DEALER sockets"""
+    logger.info("Initializing OrderManager")
     self.orders = {}
     self.live_order_ids = set([])
     # use the strategy id when constructing protobuffers
@@ -91,8 +93,19 @@ class OrderManager:
     self.positions = {}
     self.pending = OneToManyDict() 
     
+  def DBG_ORDER_MAP(self):
+    logger.debug("*** ORDER MAP ***")
+    for o1 in self.live_order_ids:
+        logger.debug("ALIVE: %s", o1)
+    for o2 in self.orders:
+        logger.debug("ORDER: %s", o2)
+    logger.debug("PENDING:")
+    logger.debug(self.pending.dbg_string())
+
+ 
    
   def get_order(self, order_id):
+    #logger.info("get_order: %s", order_id)
     assert order_id in self.orders,\
       "Couldn't find order id %s" % str(order_id)
     return self.orders[order_id]
@@ -101,17 +114,24 @@ class OrderManager:
     
     #print self.pending
     #print "pending id accepted", order_id,  pending_id
+    logger.info("pending id accepted %s %s", order_id,  pending_id)
     assert self.pending.has_value(pending_id), \
       "Unexpected pending ID %s for order %s" % \
       (pending_id, order_id)
+    logger.info("Removing pending id: %s", pending_id)
     self.pending.remove_value(pending_id)
     self.get_order(order_id).id = pending_id
+    logger.info("Renaming order_id %s to %s", self.get_order(order_id).id, pending_id) 
+    self.DBG_ORDER_MAP()
 
   def pending_id_rejected(self, order_id, pending_id):
+    logger.info("pending id REJECTED %s %s", order_id,  pending_id)
     assert self.pending.has_value(pending_id), \
       "Unexpected pending ID %s for order %s" % \
       (pending_id, order_id)
+    logger.info("pending rejected so removing %s", pending_id) 
     self.pending.remove_value(pending_id)
+    self.DBG_ORDER_MAP()
  
   def is_pending(self, pending_id):
     return self.pending.has_value(pending_id)
@@ -141,6 +161,7 @@ class OrderManager:
     
   
   def _rename(self, old_id, new_id):
+    logger.debug("_rename %s to %s", old_id, new_id)
     assert old_id in self.orders, "Can't rename non-existent order %s" % str(old_id)
     assert old_id in self.live_order_ids, "Can't rename dead order %s" % str(old_id)
    
@@ -203,6 +224,7 @@ class OrderManager:
   
      
   def _handle_execution_report(self, er):
+
     order_id = uuid.UUID(bytes = er.cl_order_id)
 
     # only used for cancel and cancel/replace
@@ -217,9 +239,9 @@ class OrderManager:
     unfilled_qty = er.leaves_qty
     avg_price = er.avg_price 
  
-    logger.info("Exec Report: order_id = %s, orig_id = %s, status = %s, exec_type = %s", 
-      order_id, original_order_id, EXEC_TYPE.to_str(status), 
-      EXEC_TYPE.to_str(exec_type))     
+    logger.info("Exec Report: venue_id = %d, order_id = %s, orig_id = %s, status = %s, exec_type = %s, transaction_type= %s, side = %s, price = %f, qty = %d, filled_qty = %d, unfilled_qty = %d, avg_price = %f", 
+      er.venue_id, order_id, original_order_id, EXEC_TYPE.to_str(status), EXEC_TYPE.to_str(exec_type), transaction_type, er.side, price, qty, filled_qty, unfilled_qty, avg_price)     
+    
 
  
     # NEW transactions are updates to our state and STATUS transactions just
@@ -279,8 +301,10 @@ class OrderManager:
       elif transaction_type == EXEC_TRANS_TYPE.NEW:
         logger.warning("Order %s should have been alive before entering terminal state %s", 
           str(order_id), ORDER_STATUS.to_str(status))
+    self.DBG_ORDER_MAP()
   
-  
+
+ 
   def _handle_cancel_reject(self, cr):
     order_id = uuid.UUID(bytes = cr.cl_order_id)  
     orig_id = uuid.UUID(bytes = cr.orig_cl_order_id)
@@ -351,8 +375,9 @@ class OrderManager:
     
     
   def send_new_order(self, venue, symbol, side, price, qty, order_type = LIM, time_in_force = GFD):
-    print "Attempting to create new order: venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
-      (venue, symbol, side, price, qty)
+    #print "Attempting to create new order: venue = %s, symbol = %s, side = %s, price = %s, size = %s" % \
+    #  (venue, symbol, side, price, qty)
+    logger.info("send_new_order: venue = %s, symbol = %s, side = %s, price = %f, size = %s" , venue, symbol, side, price, qty)
     
     order_id = fresh_id()
     order = Order(order_id, venue, symbol, side, price, qty, 
@@ -367,12 +392,13 @@ class OrderManager:
     self.orders[order_id] = order
     self.live_order_ids.add(order_id)
     self.pending.add(order_id, order_id)
-    logger.info("Sent new order to %s: %s", venue, order)
+    #logger.info("Sent new order to %s: %s", venue, order)
+    self.DBG_ORDER_MAP()
     return order_id
  
   def send_cancel_replace(self, order_id, price, qty):
     #print "Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty)
-    logger.info("Attempting to cancel/replace %s to price=%s qty=%s" % (order_id, price, qty))
+    logger.info("send_cancel_replace: %s to price=%s qty=%s" % (order_id, price, qty))
     assert order_id in self.orders
     assert order_id in self.live_order_ids
     order = self.orders[order_id]
@@ -391,13 +417,14 @@ class OrderManager:
     bytes = pb.SerializeToString()
     socket.send_multipart([tag, self.strategy_id, request_id.bytes, bytes])
 
-    logger.info(\
-     "Sent cancel/replace to %s: orig_id = %s, new_id = %s, price = %s, qty= %s", 
-     venue, str(order_id), str(request_id), price, qty)
+    #logger.info(\
+    # "Sent cancel/replace to %s: orig_id = %s, new_id = %s, price = %s, qty= %s", 
+    # venue, str(order_id), str(request_id), price, qty)
+    self.DBG_ORDER_MAP()
     return request_id
     
   def send_synth_cancel_replace(self, order_id, price, qty):
-    logger.info("Attempting SYNTHETIC cancel/replace %s to price=%s qty=%s" % (order_id, price, qty))
+    logger.info("send_synth_cancel_replace: %s to price=%s qty=%s" % (order_id, price, qty))
     assert order_id in self.orders
     assert order_id in self.live_order_ids
     order = self.orders[order_id]
@@ -411,24 +438,22 @@ class OrderManager:
     # send the new order with the modified price 
     new_order_request_id = self.send_new_order(order.venue, order.symbol, order.side, price, qty)
 
-    logger.info(\
-     "Sent synthetic cancel/replace", 
-     "1) Sent cancel to %s: orig_id = %s, new_id = %s", 
-     (venue, str(order_id), str(cancel_request_id)))
-    logger.info(\
-     "2) Sent new order to %s: new_id = %s, price = %s, qty= %s", 
-     (venue, str(new_order_request_id), price, qty))
+    logger.info( "Sent synthetic cancel/replace") 
+    logger.info("1) Sent cancel to %s: orig_id = %s, new_id = %s", order.venue, str(order_id), str(cancel_request_id))
+    logger.info("2) Sent new order to %s: new_id = %s, price = %f, qty= %s", order.venue, str(new_order_request_id), price, qty)
+
+    self.DBG_ORDER_MAP()
     return new_order_request_id
  
 
   def send_cancel(self, order_id):
     #print "Attempting to cancel order %s" % order_id
-    logger.info("Sending cancel for %s", str(order_id))
     assert order_id in self.orders, "Unknown order %s" % str(order_id)
     assert order_id in self.live_order_ids, "Can't cancel dead order %s" % str(order_id)
  
     order = self.orders[order_id]
     request_id = fresh_id()
+    logger.info("Sending cancel for order_id=%s, cancel_request_id=%s", str(order_id), str(request_id))
     self.orders[request_id] = order 
     self.pending.add(order_id, request_id)
 
@@ -437,8 +462,9 @@ class OrderManager:
     bytes = pb.SerializeToString()
     socket = self.order_sockets[order.venue]
     socket.send_multipart([tag, self.strategy_id, request_id.bytes, bytes])
-    logger.info("Sent cancel: order_id = %s orig_id = %s", 
-      str(request_id), str(order_id))
+    #logger.info("Sent cancel: order_id = %s orig_id = %s", 
+      #str(request_id), str(order_id))
+    self.DBG_ORDER_MAP()
     return request_id
   
   def cancel_if_alive(self, order_id):

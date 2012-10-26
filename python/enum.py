@@ -20,5 +20,7 @@ class enum:
   def to_str(self, value):
     if value in self.value_to_name:
       return self.value_to_name[value]
+    if value is None:
+      return "NONE"
     else: raise \
       RuntimeError("No variant found in code %s" % value)
