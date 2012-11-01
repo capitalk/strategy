@@ -1,3 +1,5 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
 ORDER_NEW = 0x01
 ORDER_CANCEL = 0x02
 ORDER_REPLACE = 0x03
@@ -6,7 +8,7 @@ ORDER_STATUS = 0x04
 ORDER_ACK = 0x05
 ORDER_CANCEL_REJ = 0x06
 
-LIST_STATUS  = 0x07
+LIST_STATUS = 0x07
 
 STRATEGY_HELO = 0xF0
 STRATEGY_HELO_ACK = 0xF1
@@ -21,31 +23,30 @@ OPEN_ORDER_REQ = 0xC1
 PING = 0xF2
 PING_ACK = 0xF3
 
-names = { 
-  ORDER_NEW : "ORDER_NEW",
-  ORDER_CANCEL : "ORDER_CANCEL", 
-  ORDER_REPLACE : "ORDER_REPLACE",
-  ORDER_STATUS : "ORDER_STATUS",
+names = {
+    ORDER_NEW: 'ORDER_NEW',
+    ORDER_CANCEL: 'ORDER_CANCEL',
+    ORDER_REPLACE: 'ORDER_REPLACE',
+    ORDER_STATUS: 'ORDER_STATUS',
+    ORDER_ACK: 'ORDER_ACK',
+    ORDER_CANCEL_REJ: 'ORDER_CANCEL_REJ',
+    LIST_STATUS: 'LIST_STATUS',
+    STRATEGY_HELO: 'STRATEGY_HELO',
+    STRATEGY_HELO_ACK: 'STRATEGY_HELO_ACK',
+    HEARTBEAT: 'HEARTBEAT',
+    HEARTBEAT_ACK: 'HEARTBEAT_ACK',
+    EXEC_RPT: 'EXEC_RPT',
+    POSITION_REQ: 'POSITION_REQ',
+    OPEN_ORDER_REQ: 'OPEN_ORDER_REQ',
+    PING: 'PING',
+    PING_ACK: 'PING_ACK',
+    }
 
-  ORDER_ACK : "ORDER_ACK", 
-  ORDER_CANCEL_REJ : "ORDER_CANCEL_REJ", 
-
-  LIST_STATUS : "LIST_STATUS", 
-
-  STRATEGY_HELO : "STRATEGY_HELO", 
-  STRATEGY_HELO_ACK : "STRATEGY_HELO_ACK", 
-
-  HEARTBEAT : "HEARTBEAT", 
-  HEARTBEAT_ACK  : "HEARTBEAT_ACK",
-  EXEC_RPT : "EXEC_RPT",
-
-  POSITION_REQ  : "POSITION_REQ", 
-  OPEN_ORDER_REQ  : "OPEN_ORDER_REQ",
-  PING : "PING", 
-  PING_ACK : "PING_ACK"
-}
 
 def to_str(num):
-  if num in names: return names[num]
-  else: raise RuntimeError("Unrecognized constant " + str(num))
-  
+    if num in names:
+        return names[num]
+    else:
+        raise RuntimeError('Unrecognized constant ' + str(num))
+
+
