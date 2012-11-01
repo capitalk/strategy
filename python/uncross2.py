@@ -40,6 +40,9 @@ class Cross:
     self.rescue_order_id = None
     self.rescue_start_time = None 
 
+    self.sent_bid_cancel = False
+    self.sent_offer_cancel = False
+
   def set_rescue_order_id(self, rid): 
     self.rescue_order_id = rid
     self.rescue_start_time = time.time()
@@ -61,7 +64,9 @@ class Cross:
     #
     # Send an order for the smaller qty, and  presumably more transient, side first 
     # Make sure we transact the same amount on both sides 
-    if bid_entry.size < offer_entry.size:
+    # KTK Changed criteria to not shoot at single market - bid and ask must be on different markets
+    # This is to test msg receipt on FAST
+    if (bid_entry.size < offer_entry.size):
       smaller_qty = bid_entry.size
       self.offer_order_id = \
         order_manager.send_new_order(bid_entry.venue, symbol, ASK, bid_entry.price, smaller_qty)
@@ -79,7 +84,7 @@ class Cross:
       logger.info("(B) Sending ASK (%s): %s, %s, %f, %d", self.offer_order_id, bid_entry.venue, symbol, bid_entry.price, smaller_qty); 
     self.send_time = time.time()
     self.sent = True
-  
+
   def send_when_ready(self, wait_time):
     ready_to_send = self.start_time + wait_time >= time.time()
     if ready_to_send: 
@@ -115,18 +120,20 @@ def find_best_crossed_pair(min_cross_magnitude, max_size = 10 ** 8):
         else:
           cross_size = min(bid_entry.size, offer_entry.size)
           cross_magnitude = price_difference * cross_size
-          logger.info("Cross found: %s (%s %f)@(%s %f) %d FOR %s", \
-                  symbol, bid_entry.venue, bid_entry.price, offer_entry.venue, offer_entry.price, cross_size, cross_magnitude)
+          logger.info("Cross found: %s (%s %f for %f)@(%s %f for %f) %d FOR %s", \
+                  symbol, bid_entry.venue, bid_entry.price, bid_entry.size, offer_entry.venue, offer_entry.price, offer_entry.size, cross_size, cross_magnitude)
           if yen_pair: cross_magnitude /= 80
           if cross_magnitude > best_cross_magnitude:
             best_cross = Cross(bid_entry = bid_entry, offer_entry = offer_entry)
             best_cross_magnitude = cross_magnitude 
-          else:
-            logger.info("Skipping cross: best_cross_magnitude too small at: %f", best_cross_magnitude)
   if best_cross is not None:
     logger.info("Created cross object: %s", best_cross)
     if best_cross_magnitude < min_cross_magnitude: 
+      logger.warning("Not sending - cross too small");
       best_cross = None
+    #if best_cross.bid_entry.venue == best_cross.offer_entry.venue:
+    #  logger.warning("Not sending - venues are the same");
+    #  best_cross = None
   updated_symbols.clear()
   return best_cross
 
@@ -175,8 +182,16 @@ def kill_cross():
   ask_qty = ask.cum_qty
   if bid.cum_qty == ask.cum_qty:
     logger.info("In kill_cross BID and ASK qty filled are same - checking if either order alive (%s, %s)" % (bid.id, ask.id));
-    bid_alive = order_manager.cancel_if_alive(bid.id)
-    ask_alive = order_manager.cancel_if_alive(ask.id)
+    if not cross.sent_bid_cancel:
+      bid_alive = order_manager.cancel_if_alive(bid.id)
+      cross.sent_bid_cancel = True
+    else:
+      logger.info("Not sending bid cancel again")
+    if not cross.sent_offer_cancel:
+      ask_alive = order_manager.cancel_if_alive(ask.id)
+      cross.sent_offer_cancel = True
+    else:
+      logger.info("Not sending offer cancel again")
     if (bid_alive == False and ask_alive == False):
         logger.warning("Both orders dead - finding new cross")
         #sys.exit(-1)
@@ -215,6 +230,8 @@ def both_dead(bid, offer):
 def manage_active_cross(max_order_lifetime):
   global cross
   #logger.info("manage_active_cross(%d)", max_order_lifetime)
+  if cross is None:
+      logger.warning("manage_active_cross called with cross == none")
   if cross.rescue_order_id:
     # one order got rejected or some other weird situation which 
     # required us to hedge against a lopsided position 
@@ -240,8 +257,8 @@ def manage_active_cross(max_order_lifetime):
       logger.debug("CURRENT MARKET")
       sorted_bids = md.sorted_bids(order.symbol)
       sorted_offers = md.sorted_offers(order.symbol)
-      for a in sorted_offers: logger.debug("BID: %s", a)
-      for b in sorted_bids: logger.debug("ASK: %s", b)
+      for b in sorted_bids: logger.debug("BID: %s", b)
+      for a in sorted_offers: logger.debug("ASK: %s", a)
       sys.stdout.flush()
   elif time.time() >= cross.send_time + max_order_lifetime: 
     logger.info('Cross expired')
@@ -307,7 +324,7 @@ parser.add_argument('--order-delay', type=float, default=0.0, dest='order_delay'
   help='How many milliseconds should I delay orders by?')
 parser.add_argument('--startup-wait-time', type=float, default=1, dest='startup_wait_time', 
   help="How many seconds to wait at startup until market data is synchronized")
-parser.add_argument('--min-cross-magnitude', type=float, default = 35, dest = 'min_cross_magnitude')
+parser.add_argument('--min-cross-magnitude', type=float, default = 0, dest = 'min_cross_magnitude')
 parser.add_argument('--max-order-lifetime', type=float, default = 5.0, dest='max_order_lifetime')
 
 

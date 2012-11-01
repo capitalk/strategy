@@ -14,8 +14,12 @@ logger = create_logger("market_test",
   file_level = logging.DEBUG)
 
 
-
+# Original
 STRATEGY_ID = '46210d2f-61b0-48fe-be15-4cdf17b14b48'
+
+# Uncrosser's ID
+#STRATEGY_ID = 'f16e8fc3-846e-43e5-a3bf-8728f42e7972'
+
 md = MarketData()
 # we get an order_manager back from Strategy.connect
 order_manager = None
@@ -203,6 +207,37 @@ def test_hit_ask_single(symbol='EUR/USD', qty=1000000):
         logger.info("Send new took: %f" % (t1-t0))
         logger.info("*********")
         ask_in_market = True
+
+def lift(venue_id, price, symbol='EUR/USD', qty=666000):
+    global ask_in_market
+    global updated_symbols
+
+    if ask_in_market == False:
+        logger.info("Not waiting for market update just sending bid")
+        t0 = time.time()
+        logger.info("Sending new bid at: %f", price)
+        ask_id = order_manager.send_new_order(venue_id, symbol, BID, price, qty)
+        t1 = time.time()
+        logger.info("*********")
+        logger.info("Send new took: %f" % (t1-t0))
+        logger.info("*********")
+        ask_in_market = True
+  
+
+def hit(venue_id, price, symbol='EUR/USD', qty=666000):
+    global bid_in_market
+    global updated_symbols
+
+    if bid_in_market == False:
+        logger.info("Not waiting for market update just sending offer")
+        t0 = time.time()
+        logger.info("Sending new ask at: %f", price)
+        bid_id = order_manager.send_new_order(venue_id, symbol, ASK, price, qty)
+        t1 = time.time()
+        logger.info("*********")
+        logger.info("Send new took: %f" % (t1-t0))
+        logger.info("*********")
+        bid_in_market = True
     
 # SELL the BB on the book
 def test_hit_bid_single(symbol='EUR/USD', qty=1000000):
@@ -322,10 +357,12 @@ def test():
     #test_cancel()
     #test_cancel_replace()
     #test_reject_cancel_replace()
-    #test_hit_bid_single()
+    #test_hit_bid_single(symbol="EUR/USD")
     #test_hit_ask_single()
     #test_partial_fill_bid()
-    test_cancel_replace_with_partials()
+    #test_cancel_replace_with_partials()
+    hit(venue_id=327878, price=1.20)
+    #lift(venue_id=890778, price=1.40)
 
 from argparse import ArgumentParser 
 parser = ArgumentParser(description='Market uncrosser') 

@@ -10,7 +10,18 @@ from int_util import int_to_bytes, int_from_bytes
 from order_manager2 import OrderManager
 import order_engine_constants
 
+
 context = zmq.Context()
+
+venue_specifics = {}
+
+class venue_capabilities:
+  def __init__(self, venue_id):
+    self.venue_id = venue_id
+    self.use_synthetic_cancel_replace = False
+  
+  def should_use_synthetic_cancel_replace():
+    return self.use_synthetic_cancel_replace
 
 def poll_single_socket(socket, timeout= 1.0):
   msg_parts = None
@@ -117,6 +128,7 @@ class Strategy:
        all available order engines and market data feeds, 
        return an order manager which is connected to all order sockets
     """
+    global venue_specifics
     config_socket = self.config_socket
     print "Requesting configuation from", config_server_addr
     config_socket.connect(config_server_addr)
@@ -138,6 +150,12 @@ class Strategy:
       ping_addr = str(venue_config.order_ping_addr)
       order_addr = str(venue_config.order_interface_addr) 
       md_addr = str(venue_config.market_data_broadcast_addr)
+      log_addr = str(venue_config.logging_broadcast_addr)
+      
+      vc = venue_capabilities(venue_id)
+      if venue_config.use_synthetic_cancel_replace is True:
+        venue_specifics[venue_id] = vc
+
       problem_with_addr = False
       for addr in [ping_addr, order_addr, md_addr]:
         if not address_ok(addr):
@@ -205,25 +223,28 @@ class Strategy:
     poller = zmq.Poller()
     md_socket = self.md_socket
     poller.register(md_socket, zmq.POLLIN)
+    print "ORDER SOCKETS:", self.order_sockets
+    print "ORDER SOCKET VALUES: ", self.order_sockets.values()
     for order_socket in self.order_sockets.values():
       poller.register(order_socket, zmq.POLLIN)
-      while True:
-        ready_sockets = poller.poll()
-        for (socket, state) in ready_sockets:
-          # ignore errors for now
-          if state == zmq.POLLERR:
-            print "POLLERR on socket", socket, "md socket = ", self.md_socket, \
-              "order sockets = ", self.order_sockets 
-            #print msg 
-          elif state == zmq.POLLIN:
-            if socket == md_socket:
-              msg = md_socket.recv()
-              bbo = spot_fx_md_1_pb2.instrument_bbo()
-              msg = md_socket.recv()
-              bbo.ParseFromString(msg)
-              md_update(bbo)
-            else:
-              [tag, msg] = socket.recv_multipart()
-              tag = int_from_bytes(tag) 
-              self.order_manager.received_message_from_order_engine(tag, msg)
-        place_orders()
+      
+    while True:
+      ready_sockets = poller.poll()
+      for (socket, state) in ready_sockets:
+        # ignore errors for now
+        if state == zmq.POLLERR:
+          print "POLLERR on socket", socket, "md socket = ", self.md_socket, \
+            "order sockets = ", self.order_sockets 
+          #print msg 
+        elif state == zmq.POLLIN:
+          if socket == md_socket:
+            msg = md_socket.recv()
+            bbo = spot_fx_md_1_pb2.instrument_bbo()
+            msg = md_socket.recv()
+            bbo.ParseFromString(msg)
+            md_update(bbo)
+          else:
+            [tag, msg] = socket.recv_multipart()
+            tag = int_from_bytes(tag) 
+            self.order_manager.received_message_from_order_engine(tag, msg)
+      place_orders()

@@ -20,7 +20,7 @@ from logging_helpers import create_logger
 
 #logger = create_logger('order_manager', file_name = 'order_manager.log', file_level = logging.DEBUG)
 
-logger = logging.getLogger('uncross')
+logger = logging.getLogger('market_test')
 
 """
 There are lots of complicated state transitions in the lifetime of an order 

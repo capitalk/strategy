@@ -474,6 +474,7 @@ class OrderManager:
     #self.DBG_ORDER_MAP()
       
   def received_message_from_order_engine(self, tag, msg):
+    logger.warning(">>>>>>>>>>>>>>>>>>>>>>>>>>> MSG FROM ORDER ENGINE") 
     if tag == order_engine_constants.EXEC_RPT:
       er = execution_report()
       er.ParseFromString(msg)
@@ -545,6 +546,7 @@ class OrderManager:
     socket = self.order_sockets[venue]
     tag = int_to_bytes(order_engine_constants.ORDER_NEW)
     bytes = pb.SerializeToString()
+
     socket.send_multipart([tag, self.strategy_id, order_id.bytes, bytes])
     
     self.orders[order_id] = order
