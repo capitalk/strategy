@@ -32,7 +32,7 @@ class MarketData:
         (symbol, venue) = (bbo.symbol, bbo.bid_venue_id)
         if venue == 0:
             logging.critical('Venue ID was 0, changing to 890778')
-            assert 0
+            assert 0, "Unknown venue_id in market data"
 
       # venue = 890778
 
