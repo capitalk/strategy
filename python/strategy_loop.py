@@ -12,19 +12,23 @@ from int_util import int_to_bytes, int_from_bytes
 from order_manager2 import OrderManager
 import order_engine_constants
 
+
+import venue_attrs
+from venue_attrs import venue_capabilities
+#venue_specifics = {}
+#
+#
+#class venue_capabilities:
+#
+#    def __init__(self, venue_id):
+#        self.venue_id = venue_id
+#        self.use_synthetic_cancel_replace = False
+#
+#    def use_synthetic_cancel_replace(self):
+#        return self.use_synthetic_cancel_replace
+#
+
 context = zmq.Context()
-
-venue_specifics = {}
-
-
-class venue_capabilities:
-
-    def __init__(self, venue_id):
-        self.venue_id = venue_id
-        self.use_synthetic_cancel_replace = False
-
-    def should_use_synthetic_cancel_replace(self):
-        return self.use_synthetic_cancel_replace
 
 
 def poll_single_socket(socket, timeout=1.0):
@@ -152,7 +156,6 @@ class Strategy:
        return an order manager which is connected to all order sockets
     """
 
-        global venue_specifics
         config_socket = self.config_socket
         print 'Requesting configuation from', config_server_addr
         config_socket.connect(config_server_addr)
@@ -178,8 +181,10 @@ class Strategy:
             log_addr = str(venue_config.logging_broadcast_addr)
 
             vc = venue_capabilities(venue_id)
+            venue_attrs.venue_specifics[venue_id] = vc
             if venue_config.use_synthetic_cancel_replace is True:
-                venue_specifics[venue_id] = vc
+                print 'Setting synthetic_cancel_replace for: %d' % venue_id
+                venue_attrs.venue_specifics[venue_id].use_synthetic_cancel_replace = True
 
             problem_with_addr = False
             for addr in [ping_addr, order_addr, md_addr]:

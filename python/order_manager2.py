@@ -18,12 +18,14 @@ from proto_objs.order_cancel_reject_pb2 import order_cancel_reject
 from proto_objs.new_order_single_pb2 import new_order_single
 from proto_objs.order_cancel_replace_pb2 import order_cancel_replace
 
+import venue_attrs
+
 import logging
 #from logging_helpers import create_logger
 
 # logger = create_logger('order_manager', file_name = 'order_manager.log', file_level = logging.DEBUG)
 
-logger = logging.getLogger('market_test')
+logger = logging.getLogger('uncross')
 
 
 def fresh_id():
@@ -125,7 +127,7 @@ class Order:
  #   self.last_update_time = time.time()
 
     def __str__(self):
-        return 'Order<id = %s, status=%s, venue=%s, side=%s, price=%s, qty=%d, symbol=%s, cum_qty=%d, leaves_qty=%d last_price=%f last_shares=%f LAST UPDATE:%s>' \
+        return 'Order<id = %s, status=%s, venue=%s, side=%s, price=%s, qty=%d, symbol=%s, cum_qty=%d, leaves_qty=%d last_price=%f last_shares=%f LAST UPDATE:%.6f>' \
             % (
             str(self.id),
             ORDER_STATUS.to_str(self.status),
@@ -151,8 +153,7 @@ class OrderManager:
         self.orders = {}
         self.live_order_ids = set([])
 
-    # use the strategy id when constructing protobuffers
-
+        # use the strategy id when constructing protobuffers
         self.strategy_id = strategy_id
         self.order_sockets = order_sockets
         self.positions = {}
@@ -221,6 +222,7 @@ class OrderManager:
       # self.live_order_ids.remove(order_id)
     # return order
 
+    # KTK TODO removed as dead code 20121106 - seems never to be called from anywhere
     def _rename(self, old_id, new_id):
         logger.debug('_rename %s to %s', old_id, new_id)
         assert old_id in self.orders, \
@@ -312,8 +314,14 @@ class OrderManager:
         if changed:
             order.last_update_time = time.time()
 
+    def print_position(self):
+        logger.info('POSITION INFO')
+        for k in self.positions:
+            logger.info('%s', self.positions[k])
+
+
     def handle_fill(self, order):
-        logger.debug('HANDLE_FILL(%s)', order)
+        #logger.debug('HANDLE_FILL(%s)', order)
         pos = self.positions.get(order.symbol, Position(order.symbol))
         if order.side == BID:
             pos.long_pos += order.last_shares
@@ -323,24 +331,18 @@ class OrderManager:
             pos.short_val += order.last_shares * order.last_price
 
         self.positions[order.symbol] = pos
-        logger.debug('POSITION INFO')
-        for k in self.positions:
-            logger.debug('%s', self.positions[k])
+        self.print_position();
 
     def _handle_execution_report(self, er):
 
         cl_order_id = uuid.UUID(bytes=er.cl_order_id)
 
-    # only used for cancel and cancel/replace
-
+        # only used for cancel and cancel/replace 
         if er.orig_cl_order_id is not '':
             orig_cl_order_id = uuid.UUID(bytes=er.orig_cl_order_id)
         else:
-            logger.warning('ORIG_CL_ORDER_ID IS NOT SET IN THIS ER - using cl_order_id'
-                           )
-
-        # KTK - is this OK? Fast doesn't fill in orig on new order ack
-
+            logger.warning('ORIG_CL_ORDER_ID IS NOT SET IN THIS ER - using cl_order_id')
+            # KTK - is this OK? Fast doesn't fill in orig on new order ack
             orig_cl_order_id = cl_order_id
 
         venue_id = er.venue_id
@@ -446,7 +448,7 @@ class OrderManager:
                     'Received new order for unknown ID <orig_cl_order_id=%s, cl_order_id=%s>' \
                     % (orig_cl_order_id, cl_order_id)
 
-            # self.pending.remove_value(cl_order_id)
+                self.pending.remove_value(cl_order_id)
 
                 self.live_order_ids.add(cl_order_id)
             elif exec_type == EXEC_TYPE.CANCELLED:
@@ -493,8 +495,7 @@ class OrderManager:
                 if status == ORDER_STATUS.FILL:
                     self.live_order_ids.remove(cl_order_id)
             elif exec_type == EXEC_TYPE.PARTIAL_FILL:
-
-                logger.info('RECEIVED PARTIAL FILL: %s', order)
+                logger.info('RECEIVED PARTIAL FILL');# %s', order)
                 self.handle_fill(order)
             elif exec_type == EXEC_TYPE.REJECTED:
 
@@ -590,16 +591,12 @@ class OrderManager:
       # elif transaction_type == EXEC_TRANS_TYPE.NEW:
       #  logger.warning("Order %s should have been alive before entering terminal state %s", str(cl_order_id), ORDER_STATUS.to_str(status))
 
-    # self.DBG_ORDER_MAP()
 
     def _handle_cancel_reject(self, cr):
-
-    # cl_order_id is the cancel request id
-
+        # cl_order_id is the cancel request id
         cl_order_id = uuid.UUID(bytes=cr.cl_order_id)
 
-    # orig_cl_order_id is the order id of the order we're trying to cancel
-
+        # orig_cl_order_id is the order id of the order we're trying to cancel
         orig_cl_order_id = uuid.UUID(bytes=cr.orig_cl_order_id)
 
         logger.warning('Cancel reject: cl_order_id = %s, orig_cl_order_id = %s, reason =%s'
@@ -609,10 +606,8 @@ class OrderManager:
             'Cancel reject for unknown original order ID %s' \
             % str(orig_cl_order_id)
 
-    # make sure the cancel is no longer "live"
-
-        if cl_order_id in self.live_order_ids:
-            self.live_order_ids.remove(cl_order_id)
+        # make sure the cancel is no longer "live" if cl_order_id in self.live_order_ids:
+        self.live_order_ids.remove(cl_order_id)
 
         if self.is_pending(cl_order_id):
             self.pending_id_rejected(orig_cl_order_id, cl_order_id)
@@ -620,20 +615,16 @@ class OrderManager:
             logger.warning('Got unexpected cancel rejection - maybe NEW or REPLACE were rejected or order already cancelled?'
                            )
 
-    # self.DBG_ORDER_MAP()
 
     def received_message_from_order_engine(self, tag, msg):
-        logger.warning('>>>>>>>>>>>>>>>>>>>>>>>>>>> MSG FROM ORDER ENGINE'
-                       )
         if tag == order_engine_constants.EXEC_RPT:
             er = execution_report()
             er.ParseFromString(msg)
-            logger.debug(er.__str__())
+            #logger.debug(er.__str__())
             self._handle_execution_report(er)
         elif tag == order_engine_constants.ORDER_CANCEL_REJ:
-
             cr = order_cancel_reject()
-            logger.debug(cr.__str__())
+            #logger.debug(cr.__str__())
             cr.ParseFromString(msg)
             self._handle_cancel_reject(cr)
         else:
@@ -765,7 +756,6 @@ class OrderManager:
         logger.info('send_cancel_replace: orig_id=%s, replace_id=%s price=%s qty=%s'
                      % (order_id, request_id, price, qty))
 
-    # logger.info("Sending cancel_replace for order_id=%s, cancel_request_id=%s", str(order_id), str(request_id))
 
         pb = self._make_cancel_replace_request(request_id, order,
                 price, qty)
@@ -778,8 +768,6 @@ class OrderManager:
 
         self.orders[request_id] = order
         self.pending.add(order_id, request_id)
-
-    # self.DBG_ORDER_MAP()
 
         return request_id
 
@@ -798,12 +786,10 @@ class OrderManager:
             'Trying to cancel/replace without changing anything for order %s' \
             % str(order_id)
 
-    # cancel the original order
-
+        # cancel the original order
         cancel_request_id = self.send_cancel(order_id)
 
-    # send the new order with the modified price
-
+        # send the new order with the modified price
         new_order_request_id = self.send_new_order(order.venue,
                 order.symbol, order.side, price, qty)
 
@@ -818,12 +804,10 @@ class OrderManager:
 
     def send_cancel(self, order_id):
 
-    # print "Attempting to cancel order %s" % order_id
-
-        assert order_id in self.orders, 'Unknown order %s' \
+        assert order_id in self.orders, 'send_cancel: Unknown order %s' \
             % str(order_id)
 
-    # assert order_id in self.live_order_ids, "Can't cancel dead order %s" % str(order_id)
+        #assert order_id in self.live_order_ids, "send_cancel: Can't cancel dead order %s" % str(order_id)
 
         order = self.orders[order_id]
         request_id = fresh_id()
@@ -848,9 +832,10 @@ class OrderManager:
        first checks if the order is alive and only sends a cancel request
        if it is. 
     """
-
+        
         alive = order_id in self.live_order_ids
         if alive:
+            logger.debug("Sending cancel for live order: %s", order_id)
             self.send_cancel(order_id)
         return alive
 
@@ -885,8 +870,8 @@ class OrderManager:
         qty = (qty if qty is not None else order.qty)
         price = md.liquidation_price(order.side, order.symbol,
                 order.venue)
-        return self.send_cancel_replace(order.id, price=price, qty=qty)
-
-
-    # return self.send_synth_cancel_replace(order.id, price = price, qty = qty)
+        if venue_attrs.venue_specifics[order.venue].use_synthetic_cancel_replace == True:
+            return self.send_synth_cancel_replace(order.id, price=price, qty=qty)
+        else:
+            return self.send_cancel_replace(order.id, price=price, qty=qty)
 

@@ -6,9 +6,13 @@ import collections
 import time
 from proto_objs.capk_globals_pb2 import BID, ASK
 
+import order_constants
+import logging
 Entry = collections.namedtuple('Entry', ('price', 'size', 'venue',
                                'symbol', 'timestamp'))
 
+
+logger = logging.getLogger('uncross')
 
 class MarketData:
 
@@ -96,7 +100,13 @@ class MarketData:
 
     def bid_liquidation_price(self, symbol, venue=None):
         best_offer = self.get_offer(symbol, venue)
-
+        bp = False
+        while best_offer == order_constants.NO_ASK:
+            if bp is False:
+                logger.debug("NO MARKET ================> Waiting for valid best offer - currently " , best_offer)
+                #bp = True
+            best_offer = self.get_offer(symbol, venue)
+        
     # submit a price 3 percent-pips worse than the best to improve our
     # chances of a fill
 
@@ -104,6 +114,12 @@ class MarketData:
 
     def offer_liquidation_price(self, symbol, venue=None):
         best_bid = self.get_bid(symbol, venue)
+        bp = False
+        while best_bid == order_constants.NO_BID:
+            if bp is False:
+                logger.debug("NO MARKET ================> Waiting for valid best bid - currently " , best_bid)
+                #bp = True
+            best_bid = self.get_bid(symbol, venue)
         return round(best_bid.price * 0.9997, 5)
 
     def liquidation_price(
@@ -113,9 +129,18 @@ class MarketData:
         venue,
         ):
         if side == ASK:
-            return self.offer_liquidation_price(symbol, venue)
+            liq_price = self.offer_liquidation_price(symbol, venue)
+            if 'JPY' in symbol:
+                return round(liq_price, 3)
+            else:
+                return round(liq_price, 5)
         elif side == BID:
-            return self.bid_liquidation_price(symbol, venue)
+            liq_price = self.bid_liquidation_price(symbol, venue)
+            if 'JPY' in symbol:
+                return round(liq_price, 3)
+            else:
+                return round(liq_price, 5)
+
         else:
             assert 0, "Invalid side - neither BID nor ASK specified" 
         

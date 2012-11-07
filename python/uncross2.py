@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 import time
 import logging
+from fix_constants import HANDLING_INSTRUCTION, EXEC_TYPE, \
+    EXEC_TRANS_TYPE, ORDER_STATUS
 import sys
 from market_data import MarketData
 from strategy_loop import Strategy
@@ -192,36 +194,40 @@ def find_best_crossed_pair(min_cross_magnitude, max_size=10 ** 8):
             logger.warning('Not sending - cross too small')
             best_cross = None
 
-    # if best_cross.bid_entry.venue == best_cross.offer_entry.venue:
-    #  logger.warning("Not sending - venues are the same");
-    #  best_cross = None
+        #if best_cross.bid_entry.venue == best_cross.offer_entry.venue:
+        #    logger.warning("Not sending - venues are the same");
+        #    best_cross = None
 
     updated_symbols.clear()
     return best_cross
 
 
+# KTK TODO - closing an unbalanced cross should evaluate HOW to exit the position. 
+# That is, if the position is unbalanced then is it better to buy back or sell the 
+# overage? 
 def close_unbalanced_cross(bigger, smaller):
     logger.info('Close unbalanced cross, bigger = %s smaller = %s ',
                 bigger, smaller)
+    # Cancel the larger order if alive
+    logger.info("Cancelling bigger order if alive: %s", bigger.id)
     order_manager.cancel_if_alive(bigger.id)
+    # Modify the smaller order 
     if order_manager.is_alive(smaller.id):
-        logger.info('Order %s is alive - attempting to send rescue_order'
+        logger.info('Smaller order %s is alive - attempting to send rescue_order'
                     , smaller.id)
-
-    # KTK NB - if using synthetic cance/replace to modify order the original order may
-    # partially filled so the new qty should be bigger.cum_qty - smaller.cum_qty
-
+        # KTK NB - if using synthetic cance/replace to modify order the original order may
+        # partially filled so the new qty should be bigger.cum_qty - smaller.cum_qty
         rescue_id = order_manager.liquidate_order(md, smaller.id,
                 bigger.cum_qty)
         cross.set_rescue_order_id(rescue_id)
     else:
+        logger.info("SMALLER ORDER IS DEAD")
         (side, symbol, venue) = (smaller.side, smaller.symbol,
                                  smaller.venue)
-
-    # none of the smaller side's IDs are alive, so we need to put in a new order
-
+        # none of the smaller side's IDs are alive, so we need to put in a new order
         logger.info(
-            'Dead order for %s on %s (side = %s, %d) needs %s',
+            'Sent cancel for %s and creating new hedge for %s on %s (side = %s, %d) needs %s',
+            bigger.id, 
             symbol,
             venue,
             side,
@@ -255,7 +261,7 @@ def kill_cross():
     assert cross.sent, "Can't kill a cross before you send it"
     bid = order_manager.get_order(cross.bid_order_id)
     ask = order_manager.get_order(cross.offer_order_id)
-    logger.info('kill_cross evaluating: bid=<%s>, ask=<%s>', bid, ask)
+    logger.info('kill_cross evaluating: \nbid=<%s>\nask=<%s>', bid, ask)
     bid_qty = bid.cum_qty
     ask_qty = ask.cum_qty
     if bid.cum_qty == ask.cum_qty:
@@ -265,25 +271,23 @@ def kill_cross():
             bid_alive = order_manager.cancel_if_alive(bid.id)
             cross.sent_bid_cancel = True
         else:
+            bid_alive = order_manager.is_alive(bid.id)
             logger.info('Not sending bid cancel again')
         if not cross.sent_offer_cancel:
             ask_alive = order_manager.cancel_if_alive(ask.id)
             cross.sent_offer_cancel = True
         else:
+            ask_alive = order_manager.is_alive(ask.id)
             logger.info('Not sending offer cancel again')
         if bid_alive == False and ask_alive == False:
             logger.warning('Both orders dead - finding new cross')
-
-        # sys.exit(-1)
-        # cross = find_best_crossed_pair(min_cross_magnitude, max_order_qty)
-
             both_dead(bid, ask)
     elif bid_qty > ask_qty:
-        logger.info('Closing unbalanced cross with bid_qty = %d, ask_qty = %d'
+        logger.info('close_unbalanced_cross with bid_qty = %d, ask_qty = %d'
                     , bid_qty, ask_qty)
         close_unbalanced_cross(bid, ask)
     else:
-        logger.info('Closing unbalanced cross with bid_qty = %d, ask_qty = %d'
+        logger.info('close_unbalanced_cross with bid_qty = %d, ask_qty = %d'
                     , bid_qty, ask_qty)
         close_unbalanced_cross(ask, bid)
 
@@ -320,37 +324,41 @@ def manage_active_cross(max_order_lifetime):
 
     if cross is None:
         logger.warning('manage_active_cross called with cross == none')
-    if cross.rescue_order_id:
 
-    # one order got rejected or some other weird situation which
-    # required us to hedge against a lopsided position
+    if cross.rescue_order_id:
+        # one order got rejected or some other weird situation which
+        # required us to hedge against a lopsided position
 
         order = order_manager.get_order(cross.rescue_order_id)
         rescue_pending = order_manager.is_pending(cross.rescue_order_id)
         rescue_alive = order_manager.is_alive(cross.rescue_order_id)
 
-    # rescue_dead = not (rescue_pending or rescue_alive)
+        rescue_dead = not (rescue_pending or rescue_alive)
 
         rescue_expired = time.time() - cross.rescue_start_time >= 10
-        logger.info('There is a rescue order: %s', order)
+        logger.info('There is a rescue order in the market: %s', order)
 
-    # if the order is filled, or the rescue has expired,
-    # or rescue order has died, give up on it!
+        # if the order is filled, or it has expired, or died then give up!
 
-        if order.cum_qty == order.qty:
+        # KTK 20121106 added the check for FILL since if the rescue order is rejected 
+        # then cum_qty = qty = 0. Obviously, this doesn't hedge the missing position
+        # and we're left thinking we've gotten a fill when really we still have a position
+        if order.cum_qty == order.qty and \
+            (order.status == ORDER_STATUS.FILL or order_status == ORDER_STATUS.PARTIAL_FILL):
             logger.info('Rescue succeeded: %s' % cross.rescue_order_id)
-
+            order_manager.print_position()
             cross = None
         else:
-            assert rescue_pending or rescue_alive, 'Rescue failed: %s' \
-                % order
+            # if the recue order is rejected (that is, the cxl or cxl/rep) 
+            # we end up here
+            assert rescue_pending or rescue_alive, 'Rescue failed: %s' % order
 
-      # assert (not rescue_expired), "Rescue expired: %s" % order
+            # assert (not rescue_expired), "Rescue expired: %s" % order
 
             if rescue_expired:
                 logger.critical('RESCUE EXPIRED!!!!! - maybe cancel/replace failed?'
                                 )
-            sys.stdout.write('r')
+            #sys.stdout.write('r')
             logger.debug('CURRENT MARKET')
             sorted_bids = md.sorted_bids(order.symbol)
             sorted_offers = md.sorted_offers(order.symbol)
@@ -358,12 +366,11 @@ def manage_active_cross(max_order_lifetime):
                 logger.debug('BID: %s', b)
             for a in sorted_offers:
                 logger.debug('ASK: %s', a)
-            sys.stdout.flush()
+            #sys.stdout.flush()
     elif time.time() >= cross.send_time + max_order_lifetime:
-        logger.info('Cross expired')
+        logger.info('Cross expired - calling kill_cross')
         kill_cross()
     else:
-
         bid_id = cross.bid_order_id
         bid_alive = order_manager.is_alive(bid_id)
         bid = order_manager.get_order(bid_id)
@@ -375,32 +382,20 @@ def manage_active_cross(max_order_lifetime):
             logger.info('Both orders dead')
             both_dead(bid, offer)
         elif bid_alive and offer_alive:
-
-      # logger.info("Both orders alive for %s, bid filled = %d, ask filled = %d",
-      #  bid.symbol, bid.cum_qty, offer.cum_qty)
-
-            sys.stdout.write('-')
-            sys.stdout.flush()
+            logger.info("Both orders alive")
         elif bid_alive and offer.cum_qty < offer.qty:
-
-      # offer is dead with a partial fill
-
-            logger.info('Bid alive, offer dead with %d/%d filled',
+            # offer is dead with a partial fill
+            logger.info('Bid alive, offer dead with %d/%d filled - calling kill_cross',
                         offer.cum_qty, offer.qty)
             kill_cross()
         elif offer_alive and bid.cum_qty < bid.qty:
-
-      # bid is dead with a partial fill
-
-            logger.info('Offer alive, bid dead with %d/%d filled',
+            # bid is dead with a partial fill
+            logger.info('Offer alive, bid dead with %d/%d filled - calling kill_cross',
                         offer.cum_qty, offer.qty)
             kill_cross()
         else:
-            sys.stdout.write('!')
-            sys.stdout.flush()
             logger.info('Still waiting for a fill (bid %d/%d, offer %d/%d)'
-                        , bid.cum_qty, bid.qty, offer.cum_qty,
-                        offer.qty)
+                        , bid.cum_qty, bid.qty, offer.cum_qty, offer.qty)
 
 
 def outgoing_logic(
