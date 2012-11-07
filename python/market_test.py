@@ -238,7 +238,7 @@ def test_hit_ask_single(symbol='EUR/USD', qty=1000000):
         ask_in_market = True
 
 
-def lift(
+def send_bid(
     venue_id,
     price,
     symbol='EUR/USD',
@@ -260,7 +260,7 @@ def lift(
         ask_in_market = True
 
 
-def hit(
+def send_offer(
     venue_id,
     price,
     symbol='EUR/USD',
@@ -423,10 +423,12 @@ def test():
     # test_partial_fill_bid()
     # test_cancel_replace_with_partials()
 
-    hit(venue_id=890778, price=1.20)
+    #send_bid(venue_id=327878, price=1.2050, symbol='EUR/CHF')
+    send_offer(venue_id=327878, price=1.33, symbol='EUR/USD')
 
 
-    # lift(venue_id=890778, price=1.40)
+    #send_offer(venue_id=327878, price=1.2070, symbol='EUR/CHF')
+    send_bid(venue_id=327878, price=1.20, symbol='EUR/USD')
 
 from argparse import ArgumentParser
 parser = ArgumentParser(description='Market uncrosser')
@@ -465,8 +467,7 @@ if __name__ == '__main__':
     def place_orders():
         test()
 
-
     logger.info('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Started')
-    strategy.run(md_update_wrapper, place_orders)
+    strategy.run(md_update_wrapper, place_orders, order_first=True)
     logger.info('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Stopped')
 

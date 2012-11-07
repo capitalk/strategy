@@ -255,7 +255,7 @@ class Strategy:
                 md_update(bbo)
         print 'Waited', wait_time, 'seconds, entering main loop'
 
-    def run(self, md_update, place_orders):
+    def run(self, md_update, place_orders, order_first=False):
         self._synchronize_market_data(md_update)
         poller = zmq.Poller()
         md_socket = self.md_socket
@@ -266,6 +266,8 @@ class Strategy:
             poller.register(order_socket, zmq.POLLIN)
 
         while True:
+            if order_first == True:
+                place_orders()
             ready_sockets = poller.poll()
             for (socket, state) in ready_sockets:
 
