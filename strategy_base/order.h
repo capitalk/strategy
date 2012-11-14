@@ -42,10 +42,9 @@ class Order
         Order& operator=(const Order& rhs);
 		~Order(); 	
 
-        void set(const capkproto::new_order_single& nos);
-        void set(const capkproto::order_cancel& oc);
         void set(const capkproto::execution_report& er);
-        void set(const capkproto::order_cancel_replace& ocr);
+
+        void update(const Order& order);
 
         order_id_t getOid() const { return _oid;}
         order_id_t getOrigClOid() const  { return _origClOid;}
@@ -71,6 +70,8 @@ class Order
         HandlInst_t getHandlInst() const { return _handlInst;}
         OrdRejectReason_t getOrdRejectReason() const { return _ordRejReason;}
         double getMinQty() const { return _minQty;}
+
+        void setOid(const order_id_t& oid) { this->_oid = oid;}
 
 	private: 
         void assign(const capk::Order&);

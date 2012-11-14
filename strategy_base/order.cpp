@@ -43,6 +43,7 @@ Order::~Order()
 
 };	
 
+
 void
 Order::set(const capkproto::execution_report& er) 
 {
@@ -85,19 +86,9 @@ Order::set(const capkproto::execution_report& er)
 };
 
 void
-Order::set(const capkproto::order_cancel& oc)
+Order::update(const Order& o)
 {
-}
-
-void
-Order::set(const capkproto::order_cancel_replace& ocr)
-{
-}
-
-void
-Order::set(const capkproto::new_order_single& nos) 
-{
-    
+    assign(o);
 }
 
 void

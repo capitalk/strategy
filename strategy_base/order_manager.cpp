@@ -35,10 +35,10 @@ typedef dense_hash_map<order_id_t, Order, std::tr1::hash<order_id>, eq_order_id>
 order_map_t pendingOrders;
 order_map_t workingOrders;
 order_map_t completedOrders;	
+order_map_t allOrders;	
 
 void list_orders();
 
-//capkproto::new_order_single
 void
 create_order(capkproto::new_order_single* nos, 
                 const strategy_id_t& sid,
@@ -68,6 +68,18 @@ create_order(capkproto::new_order_single* nos,
 	//return nos;
 }	
 
+void
+handle_fill(const Order &order)
+{
+#ifdef LOG
+    pan::log_DEBUG("handle_fill", pan::getSymbol()," ", 
+            pan::character(order.getSide()), " ", 
+            pan::real(order.getOrdQty()),"/", 
+            pan::real(order.getCumQty()),
+            "execType:", pan::character(order.getExecType()), 
+            "ordStatus:", pan::character(order.getOrdStatus()));
+#endif
+}
 
 void 
 handleExecutionReport(capkproto::execution_report& er) 
@@ -75,7 +87,6 @@ handleExecutionReport(capkproto::execution_report& er)
     //pan::log_DEBUG("handleExecutionReport()");
     // turn the er into an order object
     timespec ts;
-    bool isNewItem;
     capk::Order order;
     order.set(const_cast<capkproto::execution_report&>(er));
 
@@ -95,6 +106,8 @@ handleExecutionReport(capkproto::execution_report& er)
 #endif
 
     capk::OrdStatus_t ordStatus = order.getOrdStatus();
+    capk::ExecType_t execType  = order.getExecType();
+    capk::ExecTransType_t execTransType  = order.getExecTransType();
 /*
     uuidbuf_t testbuf;
     order_id_t ooo;
@@ -106,7 +119,9 @@ handleExecutionReport(capkproto::execution_report& er)
     pan::log_DEBUG("ORIGCLOID: ", er.orig_cl_order_id(), pan::integer(er.orig_cl_order_id().size()));
 */
 
-    //pan::log_DEBUG(er.DebugString());
+#ifdef DEBUG
+    pan::log_DEBUG("Full execution report protobuf", er.DebugString());
+#endif
 
     // There are three FIX tags that relay the status of an order
     // 1) ExecTransType (20)
@@ -119,7 +134,140 @@ handleExecutionReport(capkproto::execution_report& er)
     // a fill while a cancel is pending). 
     // see fix-42-with_errata_2001050.pdf on http://fixprotocol.org for more info
 
+    // Check for unsupported transaction times
+    if (execTransType == capk::EXEC_TRAN_CANCEL || 
+            execTransType == capk::EXEC_TRAN_CORRECT || 
+            execTransType == capk::EXEC_TRAN_STATUS) {
+        pan::log_ALERT("UNSUPPORTED EXEC TRANS TYPE(20):", pan::character((char)execTransType));
+    }
+
+    if (execType == capk::EXEC_TYPE_STOPPED || 
+            execType == capk::EXEC_TYPE_SUSPENDED ||
+            execType == capk::EXEC_TYPE_RESTATED || 
+            execType == capk::EXEC_TYPE_CALCULATED) {
+        pan::log_ALERT("UNSUPPORTED EXEC TYPE(150):", pan::character((char)execType));
+    }
     
+    // Make sure that we at least have a record of all orders
+    order_map_iter_t currentOrder = allOrders.find(oid);
+    assert(currentOrder != allOrders.end());
+
+    currentOrder->second.update(order);    
+    
+    if (execTransType == capk::EXEC_TRAN_NEW) {
+        if (execType == capk::EXEC_TYPE_NEW) { 
+            assert(pendingOrders.find(oid) != pendingOrders.end());
+            // insert before we delete 
+            order_map_insert_t insert = 
+                workingOrders.insert(order_map_value_t(oid, order));
+            pendingOrders.erase(oid);
+        }
+        else if (execType == capk::EXEC_TYPE_CANCELLED) {
+            order_map_iter_t currentOrder = pendingOrders.find(oid);
+            if (currentOrder == pendingOrders.end()) {
+                uuidbuf_t oidbuf;
+                oid.c_str(oidbuf);
+                uuidbuf_t origoidbuf;
+                origOid.c_str(origoidbuf);
+                pan::log_ALERT("Unknown cancel received for orig_cl_order_id:", origoidbuf, oidbuf);
+            }
+            else {
+                currentOrder->second = order; // KTK TODO - will this be OK?  !!!! CHECK THIS 
+                workingOrders.erase(origOid);
+                pendingOrders.erase(origOid);
+            }
+        }
+        else if (execType == capk::EXEC_TYPE_FILL) {
+            pan::log_DEBUG("Received fill");
+            if (ordStatus == capk::ORD_STATUS_FILL) {
+                pan::log_DEBUG("-- FULL FILL");
+                workingOrders.erase(oid);
+            }
+            else if (ordStatus == capk::ORD_STATUS_PARTIAL_FILL) {
+                pan::log_DEBUG("-- PARTIAL FILL");
+            }
+            handle_fill(order);
+        }
+        else if (execType == capk::EXEC_TYPE_PARTIAL_FILL) {
+            handle_fill(order);
+        }
+        else if (execType == capk::EXEC_TYPE_REJECTED) {
+            assert(pendingOrders.find(oid) != pendingOrders.end());
+        }
+        else if (execType == capk::EXEC_TYPE_PENDING_CANCEL) {
+            pan::log_DEBUG("Received pending cancel");
+        }
+        else if (execType == capk::EXEC_TYPE_REPLACE) {
+            if (pendingOrders.find(oid) == pendingOrders.end()) {
+                uuidbuf_t oidbuf;
+                oid.c_str(oidbuf);
+                uuidbuf_t origoidbuf;
+                oid.c_str(origoidbuf);
+                pan::log_DEBUG("Replace is not pending for oid: ", oidbuf, "orig_cl_ord_id:", origoidbuf);
+            }
+            order_map_iter_t currentOrder = workingOrders.find(oid);
+            assert(currentOrder != workingOrders.end());
+            assert(allOrders.find(oid) != allOrders.end());
+            currentOrder->second = order; // KTK TODO - will this be OK? !!!! CHECK THIS
+            workingOrders.erase(origOid);
+            order_map_insert_t insert = 
+                workingOrders.insert(order_map_value_t(oid, order));
+            pendingOrders.erase(origOid);
+        }
+        else if (execType == capk::EXEC_TYPE_SUSPENDED) {
+            uuidbuf_t oidbuf;
+            oid.c_str(oidbuf);
+            uuidbuf_t origoidbuf;
+            origOid.c_str(origoidbuf);
+            pan::log_CRITICAL("Trade suspended - oid:", oidbuf, " orig_cl_ord_id: ", origoidbuf,
+                    " wait for promotion/demotion for trade");
+        }
+    }
+    else if (execTransType == capk::EXEC_TRAN_CANCEL) {
+        uuidbuf_t oidbuf;
+        oid.c_str(oidbuf);
+        uuidbuf_t origoidbuf;
+        origOid.c_str(origoidbuf);
+        pan::log_ALERT("Unsolicited CANCEL (busted exec) request for oid: ", oidbuf, " orig_cl_ord_id: ", origoidbuf);
+        pan::log_ALERT("New exec:", "price:", pan::real(order.getPrice()), 
+                "qty:", pan::real(order.getOrdQty()), 
+                "cum_qty:", pan::real(order.getCumQty()), 
+                "leaves_qty:", pan::real(order.getLeavesQty()), 
+                "avg_price:", pan::real(order.getAvgPrice()), 
+                "order_status:", pan::character((char)order.getOrdStatus()));
+    }
+    else if (execTransType == capk::EXEC_TRAN_CORRECT) {
+        uuidbuf_t oidbuf;
+        oid.c_str(oidbuf);
+        uuidbuf_t origoidbuf;
+        origOid.c_str(origoidbuf);
+        pan::log_ALERT("Unsolicited CORRECT (busted exec) request for oid: ", oidbuf, " orig_cl_ord_id: ", origoidbuf);
+        pan::log_ALERT("Corrected exec:", "price:", pan::real(order.getPrice()), 
+                "qty:", pan::real(order.getOrdQty()), 
+                "cum_qty:", pan::real(order.getCumQty()), 
+                "leaves_qty:", pan::real(order.getLeavesQty()), 
+                "avg_price:", pan::real(order.getAvgPrice()), 
+                "order_status:", pan::character((char)order.getOrdStatus()));
+    }
+    else if (execTransType == capk::EXEC_TRAN_STATUS) {
+        pan::log_CRITICAL("UNSUPPORTED Received execTransType == capk::EXEC_TRAN_STATUS (", pan::character((char)execTransType), ")");
+    }
+
+    if (ordStatus == capk::ORD_STATUS_FILL ||
+            ordStatus == capk::ORD_STATUS_CANCELLED ||
+            ordStatus == capk::ORD_STATUS_REJECTED || 
+            ordStatus == capk::ORD_STATUS_EXPIRED) {
+        uuidbuf_t oidbuf;
+        oid.c_str(oidbuf);
+        pan::log_DEBUG("Removing:", oidbuf, " from working orders");
+        workingOrders.erase(oid);
+    }
+
+
+// Older version of code below that relies (incorrectly) on the order status rather 
+// than the execution type to determine the action to take
+#if 0
+    bool isNewItem;
     if (ordStatus == capk::ORD_STATUS_NEW) {
         assert(workingOrders.find(oid) == workingOrders.end());
         // Can't assert this since not all exchanges send PENDING_NEW before
@@ -134,7 +282,7 @@ handleExecutionReport(capkproto::execution_report& er)
                         pan::blob(oid.get_uuid(), oid.size()));
         }
         size_t numPendingOrders = pendingOrders.erase(oid);
-        pan::log_DEBUG("Remaining pending orders: ", pan::integer(numPendingOrders));
+        pan::log_DEBUG("Remaining pending orders: ", pan::character(numPendingOrders));
 
         clock_gettime(CLOCK_REALTIME, &ts); 
         pan::log_DEBUG("NEW ",
@@ -265,6 +413,7 @@ handleExecutionReport(capkproto::execution_report& er)
         order_map_insert_t insert = 
            workingOrders.insert(order_map_value_t(oid, order)); 
 
+
         order_map_iter_t orderIter = workingOrders.find(origOid);
         // orig order must be found in working orders
         assert(orderIter != workingOrders.end());
@@ -349,7 +498,7 @@ handleExecutionReport(capkproto::execution_report& er)
     //pan::log_DEBUG("Num pending orders: ", pan::integer(pendingOrders.size()));
     //pan::log_DEBUG("Num working orders: ", pan::integer(workingOrders.size()));
     //pan::log_DEBUG("Num completed orders: ", pan::integer(completedOrders.size()));
-
+#endif
 }
 
 void

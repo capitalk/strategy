@@ -51,12 +51,11 @@ typedef std::pair<order_id_t, Order> order_map_value_t;
 extern order_map_t pendingOrders;
 extern order_map_t workingOrders;
 extern order_map_t completedOrders;	
+extern order_map_t allOrders;	
 
 void list_orders();
 
-//capkproto::new_order_single
-void
-create_order(capkproto::new_order_single* nos, 
+void create_order(capkproto::new_order_single* nos, 
                 const strategy_id_t& sid,
                 const char* symbol, 
 				capk::Side_t side,
