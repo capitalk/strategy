@@ -16,6 +16,7 @@ OrderMux::OrderMux(zmq::context_t* context,
 				_msgCount(0),
                 _inproc(NULL)
 {
+    memset(_oiArray, 0, sizeof(_oiArray));
 };
 
 OrderMux::~OrderMux()
@@ -41,7 +42,6 @@ OrderMux::stop()
 	_stopRequested = true;
 }
 
-
 // TODO - change to return int = num of installed interfaces
 bool 
 OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
@@ -63,12 +63,17 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
                 " NOT ADDING INTERFACE");
     }
     else {
-        if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
+        //if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
+        if (_oiArraySize < MAX_ORDER_ENTRY_INTERFACES) {
             _oiArray[_oiArraySize] = oi;	
-            _oiArraySize++;
             pan::log_DEBUG("Adding order interface: ", pan::integer(oi->getVenueID()), " [", pan::integer(_oiArraySize), "]");
+            _oiArraySize++;
             return true;
         }
+    }
+    for (size_t i = 0; i< _oiArraySize; i++) {
+        pan::log_DEBUG("_OIARRAYSIZE is  :", pan::integer((int)i));
+        pan::log_DEBUG("=================>", pan::integer((int)i),":", pan::integer(_oiArray[i]->getVenueID()));
     }
     return false;
 }
@@ -157,12 +162,13 @@ OrderMux::run()
 					zmq::socket_t* venue_sock = NULL;
 					int venue_id = *(static_cast<int*>(venue_id_msg.data()));
 #ifdef LOG
-					pan::log_DEBUG("OMUX (outbound) received msg for iterface id: ", pan::integer(venue_id));
+					pan::log_DEBUG("OMUX (outbound) received msg for interface id: ", pan::integer(venue_id));
 #endif
 
 					size_t sockIdx;
 					for (sockIdx = 0; sockIdx < _oiArraySize; sockIdx++) {
 						if (_oiArray[sockIdx]->getVenueID() == venue_id) {
+                            pan::log_DEBUG("++++++++++", pan::integer(sockIdx), pan::integer(venue_id));
 							venue_sock = _oiArray[sockIdx]->getInterfaceSocket();
 							assert(venue_sock);
 #ifdef LOG
@@ -171,8 +177,9 @@ OrderMux::run()
 #endif
 						}
 					}
-					if (sockIdx > _oiArraySize) {
+					if (sockIdx >= _oiArraySize) {
 						pan::log_CRITICAL("OMUX (outbound) cant find interface for id: ", pan::integer(venue_id), " MSG NOT SENT!");
+                        return (-1);
 					}
 
 				do {
