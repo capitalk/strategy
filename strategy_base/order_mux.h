@@ -8,6 +8,7 @@
 #include "client_order_interface.h"
 
 #include "utils/logging.h"
+#include "utils/types.h"
 
 namespace capk {
 
@@ -23,10 +24,15 @@ class OrderMux
 
 		// TODO - change to return int = num of installed interfaces?
 		bool addOrderInterface(capk::ClientOrderInterface* oi, 
-                const int ping_timeout_us = 500);
+                const int64_t ping_timeout_us);
 
+        bool init(const capk::strategy_id_t& sid);
 		int run();
 		void stop();
+
+        inline size_t get_num_interfaces() const {
+            return _oiArraySize;
+        }
 
 	private:
 		void rcv_RESPONSE(zmq::socket_t* sock);

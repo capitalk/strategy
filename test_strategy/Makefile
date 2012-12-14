@@ -3,13 +3,15 @@ CC=g++
 
 PROTOC=protoc
 
+ROOT=../../..
+SYS_ROOT=$(ROOT)/capitalk
 
-#SRC=..
-
-COMMON=../../common
+COMMON=$(SYS_ROOT)/common
 UTILS=$(COMMON)/src/c++
 UTILS_SRC=$(UTILS)/utils
 PROTO=$(COMMON)/proto
+
+PANTHEIOS_EXT=$(ROOT)/pantheios_be_zmq
 
 BOOST=/usr/local/boost
 STRATEGY_BASE=..
@@ -21,27 +23,20 @@ INCLUDE= -I $(COMMON) \
 		 -I $(STLSOFT)/include \
 		 -I $(STRATEGY_BASE)
 
-#INCLUDE=-I$(BOOST) \
-		-I $(PANTHEIOS_ROOT)/include \
-		-I $(STLSOFT)/include \
-		-I $(UTILS) \
-		-I $(PROTO) \
-		-I $(STRATEGY_BASE)
-
-LIBS=	-lquickfix \
-		-lboost_date_time \
+LIBS=	-lboost_date_time \
 		-lboost_program_options \
 		-lboost_filesystem \
 		-lzmq \
 		-lprotobuf \
 		-lrt \
 		-lboost_thread \
-		-lgtest
+		-lgtest \
+		#-lquickfix
 
 
 PANTHEIOS_LIBS= -L $(PANTHEIOS_ROOT)/lib \
         -l pantheios.1.core.gcc44.file64bit \
-        -l pantheios.1.fe.simple.gcc44.file64bit.debug \
+        -l pantheios.1.fe.N.gcc44.file64bit.debug \
         -l pantheios.1.util.gcc44.file64bit \
 		-l pantheios.1.be.N.gcc44.file64bit \
         -l pantheios.1.bec.file.gcc44.file64bit \
@@ -75,8 +70,9 @@ test_strategy.strat: test_strategy.o \
 			   	market_data_mux.o \
 				client_market_data_interface.o \
 				order.o \
+				pantheios_be_zmq.o \
 				$(PROTOBUF_OBJS)  
-	$(CC) $(LDFLAGS) test_strategy.o order_manager.o strategy_protocol.o jenkins_hash.o client_order_interface.o order_mux.o logging.o time_utils.o timing.o market_data_mux.o client_market_data_interface.o order.o $(PROTOBUF_OBJS) $(LIBS) $(PANTHEIOS_LIBS) -o $@ 
+	$(CC) $(LDFLAGS) test_strategy.o order_manager.o strategy_protocol.o jenkins_hash.o client_order_interface.o order_mux.o logging.o time_utils.o timing.o market_data_mux.o client_market_data_interface.o order.o pantheios_be_zmq.o $(PROTOBUF_OBJS) /usr/local/lib/libquickfix.a $(LIBS) $(PANTHEIOS_LIBS) -o $@ 
 
 test_strategy.o: test_strategy.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
@@ -113,6 +109,9 @@ time_utils.o: $(UTILS_SRC)/time_utils.cpp
 
 timing.o: $(UTILS_SRC)/timing.cpp
 	$(CC) -c $(INCLUDE) $(CFLAGS) $<
+
+pantheios_be_zmq.o: $(PANTHEIOS_EXT)/pantheios_be_zmq.cpp
+	$(CC) -c $(INCLUDE) $(CFLAGS) -Dunix $<
 
 
 # PROTOS

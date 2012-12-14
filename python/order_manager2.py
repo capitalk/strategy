@@ -180,15 +180,14 @@ class OrderManager:
             % str(order_id)
         return self.orders[order_id]
 
-    def pending_id_accepted(self, order_id, pending_id):
-
-        logger.info('pending id accepted %s %s', order_id, pending_id)
-        assert self.pending.has_value(pending_id), \
-            'Unexpected pending ID %s for order %s' % (pending_id,
-                order_id)
-        self.pending.remove_value(pending_id)
-        self.get_order(order_id).id = pending_id
-
+    # def pending_id_accepted(self, order_id, pending_id):
+        # logger.info('pending id accepted %s %s', order_id, pending_id)
+        # assert self.pending.has_value(pending_id), \
+            # 'Unexpected pending ID %s for order %s' % (pending_id,
+                # order_id)
+        # self.pending.remove_value(pending_id)
+        # self.get_order(order_id).id = pending_id
+ 
     def pending_id_rejected(self, order_id, pending_id):
         logger.info('pending id REJECTED order_id=%s pending_id=%s',
                     order_id, pending_id)
@@ -409,7 +408,7 @@ class OrderManager:
     # #################################
 
         assert cl_order_id in self.orders, \
-            'Unknown order venue=%d, cl_order_id=%s, price=%f, side=%d, qty=%s, filled=%s' \
+                'Received unknown order: venue=%d, cl_order_id=%s, price=%f, side=%d, qty=%s, filled=%s' \
             % (
             venue_id,
             cl_order_id,
@@ -482,7 +481,7 @@ class OrderManager:
                     self.pending.remove_value(cl_order_id)
                     self.pending.remove_key(orig_cl_order_id)
             elif exec_type == EXEC_TYPE.FILL:
-                logger.info('RECEIVED FILL (NOT PARTIAL): %s', order)
+                logger.info('RECEIVED FILL: %s', order)
                 self.handle_fill(order)
 
                 # The check for ord_status == FILL reflects FXCM's STUPID FUCKING HANDLING of
@@ -493,7 +492,10 @@ class OrderManager:
                 # FUCK THAT BITCHES
 
                 if status == ORDER_STATUS.FILL:
+                    logger.info(" --FILL WAS FULL");
                     self.live_order_ids.remove(cl_order_id)
+                elif status == ORDER_STATUS.PARTIAL_FILL:
+                    logger.info(" --FILL WAS PARTIAL");
             elif exec_type == EXEC_TYPE.PARTIAL_FILL:
                 logger.info('RECEIVED PARTIAL FILL');# %s', order)
                 self.handle_fill(order)
@@ -607,7 +609,11 @@ class OrderManager:
             % str(orig_cl_order_id)
 
         # make sure the cancel is no longer "live" if cl_order_id in self.live_order_ids:
-        self.live_order_ids.remove(cl_order_id)
+        # N.B. Cancel replace may be rejected and never appear as alive since live orders
+        # must have been ack'd at least once (NEW acknowlegement for example) to be moved 
+        # into live orders - otherwise they are simply pending
+        if self.is_alive(cl_order_id):
+            self.live_order_ids.remove(cl_order_id)
 
         if self.is_pending(cl_order_id):
             self.pending_id_rejected(orig_cl_order_id, cl_order_id)

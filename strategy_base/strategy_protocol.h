@@ -43,25 +43,57 @@ namespace capk {
 
 int snd_HELO(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id,
-        const capk::venue_id_t venueID);
+        const capk::venue_id_t& venueID);
+
+int snd_HELOs(zmq::socket_t* order_interface, 
+        const strategy_id_t& strategy_id,
+        const capk::venue_id_t& venueID,
+        const int64_t poll_timeout_us);
 
 int PING(zmq::context_t* pzmq_ctx, 
         const char* ping_interface_addr, 
         const int64_t ping_timeout_micros);
 
+// manual order id management - must be a param
 void snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id,
-        const capk::venue_id_t venueID, 
+        const order_id_t& orig_order_id,
+        const order_id_t& cl_order_id,
+        const capk::venue_id_t& venueID, 
         capkproto::order_cancel_replace& ocr);
 
-void snd_ORDER_CANCEL(zmq::socket_t* order_interface, 
+// auto generate order id
+void snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id,
-        const capk::venue_id_t venueID, 
+        const capk::venue_id_t& venueID, 
+        capkproto::order_cancel_replace& ocr);
+
+
+// manual order id management - must be a param
+void snd_ORDER_CANCEL(zmq::socket_t* order_interface, 
+        strategy_id_t& strategy_id, 
+        const order_id_t& orig_order_id,
+        const order_id_t& cl_order_id,
+        const capk::venue_id_t& venueID, 
         capkproto::order_cancel& oc);
 
+// auto generate order id
+void snd_ORDER_CANCEL(zmq::socket_t* order_interface, 
+        strategy_id_t& strategy_id,
+        const capk::venue_id_t& venueID, 
+        capkproto::order_cancel& oc);
+
+// manual order id management - must be a param
+void snd_NEW_ORDER(zmq::socket_t* order_interface,
+        strategy_id_t& strategy_id,
+        const order_id_t& order_id,
+        const capk::venue_id_t& venueID,
+        capkproto::new_order_single& nos);
+
+// auto generate order id
 void snd_NEW_ORDER(zmq::socket_t* order_interface, 
         strategy_id_t& strategy_id,
-        const capk::venue_id_t venueID, 
+        const capk::venue_id_t& venueID, 
         capkproto::new_order_single& nos);
 
 }

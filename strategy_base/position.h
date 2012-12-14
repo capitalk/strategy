@@ -65,6 +65,7 @@ std::ostream& operator << (std::ostream& out, const Position& p) {
         << "net_pos=" << p.net_pos() 
         << "long_avg_price=" << p.long_avg_price()
         << "short_avg_price=" << p.short_avg_price();
+    return out;
 }
 
 

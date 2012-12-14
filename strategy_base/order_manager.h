@@ -20,6 +20,8 @@
 #include <boost/thread.hpp>
 #include <boost/program_options.hpp>
 
+#include <cstdatomic>
+
 #include <uuid/uuid.h>
 
 #include "client_order_interface.h"
@@ -37,41 +39,113 @@
 #include "utils/types.h"
 #include "utils/venue_globals.h"
 
+#include "strategy_base/strategy_protocol.h"
+
+typedef void (*handler_t)(const void*);
+
 // namespace stuff
 using google::dense_hash_map;
 
 namespace capk {
 
 // Hash tables and typedefs for storing order states
-typedef dense_hash_map<order_id_t, Order, std::tr1::hash<order_id>, eq_order_id> order_map_t;
-typedef order_map_t::iterator order_map_iter_t;
-typedef std::pair<order_map_iter_t, bool> order_map_insert_t;
-typedef std::pair<order_id_t, Order> order_map_value_t;
+//typedef dense_hash_map<order_id_t, Order, std::tr1::hash<order_id>, eq_order_id> OrderMap_t;
+//typedef OrderMap_t::iterator OrderMapIter_t;
+//typedef std::pair<OrderMapIter_t, bool> OrderMapInsert_t;
+//typedef std::pair<order_id_t, Order> OrderMapValue_t;
+// Testing using shared_ptrs for storage rather than copying a lot of shit in and out
+// of the hashtable
+typedef dense_hash_map<order_id_t, Order_ptr_t, std::tr1::hash<order_id>, eq_order_id> SharedOrderMap_t;
+typedef SharedOrderMap_t::iterator SharedOrderMapIter_t;
+typedef std::pair<SharedOrderMapIter_t, bool> SharedOrderMapInsert_t;
+typedef std::pair<order_id_t, Order_ptr_t> SharedOrderMapValue_t;
 
-extern order_map_t pendingOrders;
-extern order_map_t workingOrders;
-extern order_map_t completedOrders;	
-extern order_map_t allOrders;	
+class OrderManager 
+{
+    public:
+    OrderManager(zmq::socket_t* oi,
+            const strategy_id_t& sid);
+    ~OrderManager();
 
-void list_orders();
+    void handleExecutionReport(capkproto::execution_report& er);
 
-void create_order(capkproto::new_order_single* nos, 
-                const strategy_id_t& sid,
-                const char* symbol, 
-				capk::Side_t side,
-				double quantity,
-				double price);
+    void handleOrderCancelReject(capkproto::order_cancel_reject& ocr);
+
+    void handle_fill(const Order&); 
+
+    bool get_order(const order_id_t& cl_order_id, capk::Order& o);
+
+    bool receiveOrder(zmq::socket_t* sock);
+
+    void printOrderMap(SharedOrderMap_t& om);
+
+    void list_orders();
 
 
-void handleExecutionReport(capkproto::execution_report& er);
+    order_id_t send_new_order(const venue_id_t& venue_id,
+        const char* symbol,
+        const capk::Side_t& side,
+        const double price,
+        const double qty);
 
-void handleOrderCancelReject(capkproto::order_cancel_reject& ocr);
+    order_id_t send_cancel(const capk::venue_id_t& venue_id,
+        const capk::order_id_t& orig_order_id,
+        const char* symbol,
+        const capk::Side_t side,
+        const double qty);
 
-bool receiveOrder(zmq::socket_t* sock);
+    order_id_t send_cancel_replace(const capk::venue_id_t& venue_id,
+        const capk::order_id_t& orig_order_id,
+        const char* symbol,
+        const capk::Side_t side,
+        const double new_price,
+        const double new_qty);
 
-void printOrderHash(order_map_t& om);
+    void set_callback_order_new(handler_t callback) {
+        _callback_order_new = callback;
+    }
 
-void list_orders();
+    void set_callback_order_fill(handler_t callback) {
+        _callback_order_fill = callback;
+    }
+
+    void set_callback_order_reject(handler_t callback) {
+        _callback_order_reject = callback;
+    }
+
+#ifdef DEBUG
+    void DBG_ORDER_MAP();
+#endif
+
+    private:
+    // KTK - TODO do we really need to keep three MAPs? 
+    // Can pending, working, and completed just be lists
+    // or orders? Is this faster? Or is having the shared_ptr
+    // to the order in the map better? I think latter for now
+    // due to locality of ref but should be tested.
+    SharedOrderMap_t _pending_orders;
+    SharedOrderMap_t _working_orders;
+    SharedOrderMap_t _completed_orders;	
+    SharedOrderMap_t _all_orders;	
+
+    zmq::socket_t* _order_interface;
+    strategy_id_t _sid;
+
+    OrderManager& operator=(const OrderManager& om);
+    OrderManager(const OrderManager& om);
+    OrderManager();
+
+    void get_new_order_id(order_id_t* oid);
+    void generate_order_id_cache(order_id_t** oid);
+    std::atomic<int> _order_id_cache_idx;
+    int _order_id_cache_size;
+    order_id_t* _order_id_cache;
+
+    handler_t _callback_order_fill;
+    handler_t _callback_order_new;
+    handler_t _callback_order_reject;
+
+};
 
 } // namespace capk
 

@@ -424,11 +424,11 @@ def test():
     # test_cancel_replace_with_partials()
 
     #send_bid(venue_id=327878, price=1.2050, symbol='EUR/CHF')
-    send_offer(venue_id=327878, price=1.33, symbol='EUR/USD')
+    send_offer(venue_id=327878, price=79.999, symbol='AUD/JPY')
 
 
     #send_offer(venue_id=327878, price=1.2070, symbol='EUR/CHF')
-    send_bid(venue_id=327878, price=1.20, symbol='EUR/USD')
+    send_bid(venue_id=327878, price=79.0, symbol='AUD/JPY')
 
 from argparse import ArgumentParser
 parser = ArgumentParser(description='Market uncrosser')

@@ -43,14 +43,17 @@ OrderMux::stop()
 }
 
 // TODO - change to return int = num of installed interfaces
+// WHY?
 bool 
 OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
-        const int ping_timeout_us)
+        const int64_t ping_timeout_us)
 {
     if (!oi) { 
         return false;
     }
 
+    pan::log_DEBUG("_OIARRAYSIZE is  :", pan::integer((int)_oiArraySize));
+    pan::log_DEBUG("addOrderInterface pinging: ", pan::integer(oi->getVenueID()), " with timeout: ", pan::integer(ping_timeout_us));
     int pingOK = PING(oi->getContext(), 
             oi->getPingAddr().c_str(), 
             ping_timeout_us);
@@ -58,12 +61,12 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
     if (pingOK != 0) {
         pan::log_CRITICAL("PING failed to: ", 
                 oi->getPingAddr().c_str(), 
-                " with timeout (us): ", 
+                " with timeout (ms): ", 
                 pan::integer(ping_timeout_us), 
                 " NOT ADDING INTERFACE");
+        return false;
     }
     else {
-        //if (_oiArraySize+1 < MAX_ORDER_ENTRY_INTERFACES) {
         if (_oiArraySize < MAX_ORDER_ENTRY_INTERFACES) {
             _oiArray[_oiArraySize] = oi;	
             pan::log_DEBUG("Adding order interface: ", pan::integer(oi->getVenueID()), " [", pan::integer(_oiArraySize), "]");
@@ -71,21 +74,40 @@ OrderMux::addOrderInterface(capk::ClientOrderInterface* oi,
             return true;
         }
     }
+
+   return false;
+}
+
+bool
+OrderMux::init(const capk::strategy_id_t& sid)
+{
+    const int64_t helo_timeout_us = 1000;
+    size_t helo_recv = 0;
     for (size_t i = 0; i< _oiArraySize; i++) {
-        pan::log_DEBUG("_OIARRAYSIZE is  :", pan::integer((int)i));
-        pan::log_DEBUG("=================>", pan::integer((int)i),":", pan::integer(_oiArray[i]->getVenueID()));
+        zmq::socket_t* venue_socket = NULL;
+        venue_socket = _oiArray[i]->getInterfaceSocket();
+        if (venue_socket != NULL) { 
+            pan::log_DEBUG("OMUX sending HELOs to: ", pan::integer(_oiArray[i]->getVenueID()));
+            if(snd_HELOs(venue_socket, sid, _oiArray[i]->getVenueID(), helo_timeout_us) == 0) {
+                helo_recv++;
+            } 
+        }
     }
-    return false;
+    return (helo_recv == _oiArraySize);
+
 }
 
 int	
 OrderMux::run()
 {
+
+    int zero = 0;
 	try {
 		assert(_context != NULL);
 
 		_inproc = new zmq::socket_t(*_context, ZMQ_PAIR);
 		assert(_inproc);
+        _inproc->setsockopt(ZMQ_LINGER, &zero, sizeof(zero));
 		pan::log_INFORMATIONAL("Binding OrderMux inproc addr: ", 
                 _inprocAddr.c_str());
 		_inproc->bind(_inprocAddr.c_str());
@@ -150,7 +172,6 @@ OrderMux::run()
                 pan::log_ALERT("EINTR received - FILE: ", __FILE__, " LINE: ", pan::integer(__LINE__));
                 continue;
             }
-
 			// outbound orders routed to correct venue 
 			if (_poll_items[0].revents & ZMQ_POLLIN) {
 				_msgCount++;	
@@ -168,36 +189,48 @@ OrderMux::run()
 					size_t sockIdx;
 					for (sockIdx = 0; sockIdx < _oiArraySize; sockIdx++) {
 						if (_oiArray[sockIdx]->getVenueID() == venue_id) {
-                            pan::log_DEBUG("++++++++++", pan::integer(sockIdx), pan::integer(venue_id));
+                            //pan::log_DEBUG("=====>FOUND SOCKET: ",  pan::integer(sockIdx), " of ", pan::integer(_oiArraySize), pan::integer(venue_id));
 							venue_sock = _oiArray[sockIdx]->getInterfaceSocket();
 							assert(venue_sock);
 #ifdef LOG
-							pan::log_DEBUG("OMUX (outbound) found interface socket for id: ", pan::integer(venue_id));
-							pan::log_DEBUG("OMUX (outbound) interface has the following attributes:\n", "Interface address: ", _oiArray[sockIdx]->getInterfaceAddr().c_str(), "\n", "Inproc address: ", _oiArray[sockIdx]->getInprocAddr().c_str(), "\n");
+							//pan::log_DEBUG("OMUX (outbound) found interface socket for id: ", pan::integer(venue_id));
+							//pan::log_DEBUG("OMUX (outbound) interface has the following attributes:\n", "Interface address: ", _oiArray[sockIdx]->getInterfaceAddr().c_str(), "\n", "Inproc address: ", _oiArray[sockIdx]->getInprocAddr().c_str(), "\n");
 #endif
+                            break; 
 						}
 					}
+                    // The socket for the interface was not found. 
 					if (sockIdx >= _oiArraySize) {
-						pan::log_CRITICAL("OMUX (outbound) cant find interface for id: ", pan::integer(venue_id), " MSG NOT SENT!");
-                        return (-1);
+						pan::log_CRITICAL("OMUX (outbound) cant find interface for id: ", pan::integer(venue_id), " MSG NOT SENT ... BLEEDING SOCKET!");
+                        // bleed out the socket
+                        do {
+                            zmq::message_t msg;
+                            rc = _inproc->recv(&msg, 0);
+                            assert(rc);
+                            _inproc->getsockopt(ZMQ_RCVMORE, &more, &more_size);
+                        } while (more);
 					}
-
-				do {
-					// recv and forward remaining frames 
-					zmq::message_t msg;
-					rc = _inproc->recv(&msg, 0);
-					//pan::log_DEBUG("OMUX forwarding frame from inproc: ", pan::blob(msg.data(), msg.size()));
-					assert(rc);		
-					_inproc->getsockopt(ZMQ_RCVMORE, &more, &more_size);
-					rc = venue_sock->send(msg, more ? ZMQ_SNDMORE : 0);	
-				} while (more);
-				//pan::log_DEBUG("OMUX finished forwarding");
-			}
+                    // socket was found so forward messages to destination socket
+                    else {
+				        do {
+					        // recv and forward remaining frames 
+					        zmq::message_t msg;
+					        rc = _inproc->recv(&msg, 0);
+					        //pan::log_DEBUG("OMUX forwarding frame from inproc: ", pan::blob(msg.data(), msg.size()));
+					        assert(rc);		
+					        _inproc->getsockopt(ZMQ_RCVMORE, &more, &more_size);
+					        rc = venue_sock->send(msg, more ? ZMQ_SNDMORE : 0);	
+				        } while (more);
+				        //pan::log_DEBUG("OMUX finished forwarding");
+                    }
+			}   
 			else {	
 			// messages returning from venue
 			// don't need to be routed
 				for (size_t j = 0; j<_oiArraySize; j++) {
+#ifdef LOG
 					//pan::log_DEBUG("OMUX checking incoming messages on oiArray: ", pan::integer(j));
+#endif
 					if (_poll_items[j+1].revents && ZMQ_POLLIN) {
 						zmq::socket_t* sock = _oiArray[j]->getInterfaceSocket();
 						assert(sock);
@@ -244,11 +277,11 @@ OrderMux::rcv_RESPONSE(zmq::socket_t* sock)
 		
 
 		if (*(static_cast<capk::msg_t*>(msgtypeframe.data())) == capk::STRATEGY_HELO_ACK) {
-            /*
+#ifdef DEBUG
 			pan::log_DEBUG("OMUX Received msg type: ", pan::integer(capk::STRATEGY_HELO_ACK),
 							" - capk::STRATEGY_HELO_ACK from venue ID: ",
 							pan::integer(*(static_cast<capk::venue_id_t*>(msgframe.data()))));
-            */
+#endif
 		}
 		
         else {

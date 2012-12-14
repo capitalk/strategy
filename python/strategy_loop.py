@@ -270,17 +270,12 @@ class Strategy:
                 place_orders()
             ready_sockets = poller.poll()
             for (socket, state) in ready_sockets:
-
         # ignore errors for now
-
                 if state == zmq.POLLERR:
                     print 'POLLERR on socket', socket, 'md socket = ', \
                         self.md_socket, 'order sockets = ', \
                         self.order_sockets
                 elif state == zmq.POLLIN:
-
-          # print msg
-
                     if socket == md_socket:
                         msg = md_socket.recv()
                         bbo = spot_fx_md_1_pb2.instrument_bbo()

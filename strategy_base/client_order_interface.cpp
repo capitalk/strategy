@@ -8,7 +8,6 @@ namespace capk {
 
 ClientOrderInterface::~ClientOrderInterface()
 {
-    pan::log_DEBUG("ClientOrderInterface::~ClientOrderInterface()");
 	if (_interface) {
 		delete _interface;
 	}
@@ -33,11 +32,13 @@ ClientOrderInterface::init()
 	 * from the interface will then be round-robined to these and 
 	 * consequently not returned to the application thread
 	 */
+    int zero = 0;
 	if (_initComplete == false) {
 		assert(_context != NULL);
 		assert(_interfaceAddr.c_str() != NULL);
 		try {
 			_interface = new zmq::socket_t(*_context, ZMQ_DEALER);
+            _interface->setsockopt(ZMQ_LINGER, &zero, sizeof(zero));
 			assert(_interface);
 			_interface->connect(_interfaceAddr.c_str());
 		}

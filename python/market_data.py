@@ -101,25 +101,30 @@ class MarketData:
     def bid_liquidation_price(self, symbol, venue=None):
         best_offer = self.get_offer(symbol, venue)
         bp = False
-        while best_offer == order_constants.NO_ASK:
+        while best_offer.price == order_constants.NO_ASK:
             if bp is False:
-                logger.debug("NO MARKET ================> Waiting for valid best offer - currently " , best_offer)
+                logger.debug("NO MARKET ================> Waiting for valid best offer - currently %f" , best_offer.price)
                 #bp = True
             best_offer = self.get_offer(symbol, venue)
         
     # submit a price 3 percent-pips worse than the best to improve our
     # chances of a fill
-
+        logger.debug("bid_liquidation_price: %f", best_offer.price);
+        if best_offer == order_constants.NO_ASK:
+            logger.debug("LIQUIDATION ASk IS INVALID")
         return round(best_offer.price * 1.0003, 5)
 
     def offer_liquidation_price(self, symbol, venue=None):
         best_bid = self.get_bid(symbol, venue)
         bp = False
-        while best_bid == order_constants.NO_BID:
+        while best_bid.price == order_constants.NO_BID:
             if bp is False:
-                logger.debug("NO MARKET ================> Waiting for valid best bid - currently " , best_bid)
+                logger.debug("NO MARKET ================> Waiting for valid best bid - currently %f" , best_bid.price)
                 #bp = True
             best_bid = self.get_bid(symbol, venue)
+        logger.debug("offer_liquidation_price: %f", best_bid.price);
+        if best_bid == order_constants.NO_BID:
+            logger.debug("LIQUIDATION BID IS INVALID")
         return round(best_bid.price * 0.9997, 5)
 
     def liquidation_price(

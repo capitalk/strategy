@@ -17,6 +17,9 @@
 
 namespace capk {
 
+class Order;
+typedef boost::shared_ptr<Order> Order_ptr_t;
+
 class Order 
 {
 	public: 
@@ -43,6 +46,7 @@ class Order
 		~Order(); 	
 
         void set(const capkproto::execution_report& er);
+        void set(const capkproto::new_order_single& er);
 
         void update(const Order& order);
 
@@ -73,9 +77,13 @@ class Order
 
         void setOid(const order_id_t& oid) { this->_oid = oid;}
 
+        friend std::ostream& operator << (std::ostream& out, const Order& o);
+
 	private: 
         void assign(const capk::Order&);
+
 		order_id_t _oid;
+        venue_id_t _venue_id;
 		order_id_t _origClOid;
 		char _execId[EXEC_ID_LEN];	
 		ExecTransType_t _execTransType;
@@ -83,6 +91,7 @@ class Order
 		ExecType_t _execType;
 		char _symbol[SYMBOL_LEN];
 		char _secType[SEC_TYPE_LEN];
+        char _account[ACCOUNT_LEN];
 		Side_t _side;
 		double _orderQty;
 		OrdType_t _ordType;
@@ -99,9 +108,14 @@ class Order
 		HandlInst_t _handlInst;
 		OrdRejectReason_t _ordRejReason;
         double _minQty;
+        ExecRestatementReason_t _exec_restatement_reason;
+        char _exec_ref_id[EXEC_REF_ID_LEN];
 		
 
 };
+
+
+
 
 }; // namespace capk
 #endif // __ORDER_H__

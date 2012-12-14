@@ -169,19 +169,19 @@ def find_best_crossed_pair(min_cross_magnitude, max_size=10 ** 8):
                 else:
                     cross_size = min(bid_entry.size, offer_entry.size)
                     cross_magnitude = price_difference * cross_size
-                    logger.info(
-                        'Cross found: %s (%s %f for %f)@(%s %f for %f) %d FOR %s'
-                            ,
-                        symbol,
-                        bid_entry.venue,
-                        bid_entry.price,
-                        bid_entry.size,
-                        offer_entry.venue,
-                        offer_entry.price,
-                        offer_entry.size,
-                        cross_size,
-                        cross_magnitude,
-                        )
+                    #logger.info(
+                    #    'Cross found: %s (%s %f for %f)@(%s %f for %f) %d FOR %s'
+                    #        ,
+                    #    symbol,
+                    #    bid_entry.venue,
+                    #    bid_entry.price,
+                    #    bid_entry.size,
+                    #    offer_entry.venue,
+                    #    offer_entry.price,
+                    #    offer_entry.size,
+                    #    cross_size,
+                    #    cross_magnitude,
+                    #    )
                     if yen_pair:
                         cross_magnitude /= 80
                     if cross_magnitude > best_cross_magnitude:
@@ -189,15 +189,16 @@ def find_best_crossed_pair(min_cross_magnitude, max_size=10 ** 8):
                                 offer_entry=offer_entry)
                         best_cross_magnitude = cross_magnitude
     if best_cross is not None:
-        logger.info('Created cross object: %s', best_cross)
         if best_cross_magnitude < min_cross_magnitude:
             logger.warning('Not sending - cross too small')
             best_cross = None
 
-        #if best_cross.bid_entry.venue == best_cross.offer_entry.venue:
-        #    logger.warning("Not sending - venues are the same");
-        #    best_cross = None
+        if best_cross.bid_entry.venue == best_cross.offer_entry.venue:
+            #logger.warning("Not sending - venues are the same");
+            best_cross = None
 
+    if best_cross is not None:
+        logger.info('Created cross object: %s', best_cross)
     updated_symbols.clear()
     return best_cross
 
@@ -212,7 +213,10 @@ def close_unbalanced_cross(bigger, smaller):
     logger.info("Cancelling bigger order if alive: %s", bigger.id)
     order_manager.cancel_if_alive(bigger.id)
     # Modify the smaller order 
-    if order_manager.is_alive(smaller.id):
+    if order_manager.is_alive(smaller.id): 
+        if smaller.status == ORDER_STATUS.PARTIAL_FILL:
+            logger.warning("Smaller order is partially filled - NOT sending cancel/replace");
+
         logger.info('Smaller order %s is alive - attempting to send rescue_order'
                     , smaller.id)
         # KTK NB - if using synthetic cance/replace to modify order the original order may

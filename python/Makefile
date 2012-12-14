@@ -5,7 +5,7 @@ PROTO_OUT=./proto_objs
 all: protos
 
 
-protos: uncross.py
+protos: uncross2.py
 	mkdir -p $(PROTO_OUT)
 	$(PROTOC) -I$(PROTO) --python_out=$(PROTO_OUT) $(PROTO)/*.proto
 	touch $(PROTO_OUT)/__init__.py

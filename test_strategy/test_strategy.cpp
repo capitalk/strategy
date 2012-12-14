@@ -64,9 +64,12 @@ zmq::socket_t* pMDInterface = NULL;
 //typedef order_map_t::iterator order_map_iter_t;
 //typedef std::pair<order_map_iter_t, bool> order_map_insert_t;
 //typedef std::pair<order_id_t, capk::Order> order_map_value_t;
-extern capk::order_map_t pendingOrders;
-extern capk::order_map_t workingOrders;
-extern capk::order_map_t completedOrders;	
+//extern capk::order_map_t pendingOrders;
+//extern capk::order_map_t workingOrders;
+//extern capk::order_map_t completedOrders;	
+
+// Single order manager - never create MORE THAN ONE!!! 
+capk::OrderManager om;
 
 // Order multiplexer and its thread
 capk::OrderMux* ptr_order_mux = NULL;
@@ -315,7 +318,7 @@ receiveBBOMarketData(zmq::socket_t* sock)
             "[", pan::integer(tick_msg.size()), "]");
     pan::log_DEBUG("dump prb:", instrument_bbo_protobuf.DebugString());
 #endif
-    capk::MultiMarketBBO_t bbo_book;
+    capk::InstrumentBBO_t bbo_book;
 
     // TODO FIX THIS to be int id for mic rather than string	
     // OK - 20120717
@@ -351,6 +354,7 @@ init()
     // ORDER INTERFACE SETUP
     ///////////////////////////////////////////////////////////////////////////
     // Set the empty keys for storing orders in dense_hash_map
+/*
     capk::order_id_t oidEmpty("");
     capk::pendingOrders.set_empty_key(oidEmpty);
     capk::workingOrders.set_empty_key(oidEmpty);
@@ -361,7 +365,7 @@ init()
     capk::pendingOrders.set_deleted_key(oidDeleted);
     capk::workingOrders.set_deleted_key(oidDeleted);
     capk::completedOrders.set_deleted_key(oidDeleted);
-
+*/
 
     //try {
     // create the market mux and add order interfaces
@@ -540,7 +544,7 @@ main(int argc, char **argv)
             }
             else if (pollItems[1].revents && ZMQ_POLLIN) {
                 //pan::log_DEBUG("RECEIVING ORDER DATA");
-                capk::receiveOrder(pOEInterface);
+                om.receiveOrder(pOEInterface);
             }
         }
     }
@@ -578,7 +582,7 @@ main(int argc, char **argv)
 
             if (pollItems[0].revents && ZMQ_POLLIN) {
                 //pan::log_DEBUG("RECEIVING ORDER DATA");
-                capk::receiveOrder(pOEInterface);
+                om.receiveOrder(pOEInterface);
             }
             if (pollItems[1].revents && ZMQ_POLLIN) {
                 char action;
@@ -623,7 +627,7 @@ main(int argc, char **argv)
                 }
                 case 'l': 
                 {
-                    capk::list_orders();
+                    om.list_orders();
                     break;
                 }
                 default: 
