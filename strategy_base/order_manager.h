@@ -145,6 +145,11 @@ class OrderManager
     handler_t _callback_order_new;
     handler_t _callback_order_reject;
 
+    // Internal handler functions
+    void _handle_exec_new(capk::Order_ptr_t &order);
+    void _handle_exec_cancel(capk::Order_ptr_t &order);
+    void _handle_exec_reject(capk::Order_ptr_t &order);
+
 };
 
 } // namespace capk
