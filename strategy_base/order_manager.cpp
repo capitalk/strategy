@@ -42,16 +42,16 @@ OrderManager::OrderManager(zmq::socket_t* oi, const strategy_id_t& sid):
 {
     // Set empty keys
     capk::order_id_t oidEmpty("");
-    _pending_orders.set_empty_key(oidEmpty);
-    _working_orders.set_empty_key(oidEmpty);
-    _completed_orders.set_empty_key(oidEmpty);
+    //_pending_orders.set_empty_key(oidEmpty);
+    //_working_orders.set_empty_key(oidEmpty);
+    //_completed_orders.set_empty_key(oidEmpty);
     _all_orders.set_empty_key(oidEmpty);
 
     // Set deleted keys
     order_id_t oidDeleted("1");
-    _pending_orders.set_deleted_key(oidDeleted);
-    _working_orders.set_deleted_key(oidDeleted);
-    _completed_orders.set_deleted_key(oidDeleted);
+    //_pending_orders.set_deleted_key(oidDeleted);
+    //_working_orders.set_deleted_key(oidDeleted);
+    //_completed_orders.set_deleted_key(oidDeleted);
     _all_orders.set_deleted_key(oidDeleted);
 
     // Generate order id cache
@@ -109,13 +109,49 @@ OrderManager::handle_fill(const Order &order)
     }
 }
 
+
+void
+OrderManager::_handle_exec_new(capk::Order_ptr_t &order)
+{
+    order->set_state(OrderState_t::INT_STATE_NEW);
+    if (_callback_order_new) {
+        (*_callback_order_new)(static_cast<const void*>(order.get()));
+    }
+}
+
+void
+OrderManager::_handle_exec_cancel(capk::Order_ptr_t &order)
+{
+    order->set_state(OrderState_t::INT_STATE_CANCELED);
+    uuidbuf_t oidbuf;
+    order->getClOid().c_str(oidbuf);
+    pan::log_DEBUG("CANCELLED: Removing: ", oidbuf, " from orders");
+    // Remove the original order
+    _all_orders.erase(order->getOrigClOid());
+    // Remove the cancel request
+    _all_orders.erase(order->getClOid());
+}
+
+void
+OrderManager::_handle_exec_reject(capk::Order_ptr_t &order)
+{
+    order->set_state(OrderState_t::INT_STATE_REJECTED);
+    if (_callback_order_reject) {
+        (*_callback_order_reject)(static_cast<const void*>(order.get()));
+    }
+    uuidbuf_t oidbuf;
+    order->getClOid().c_str(oidbuf);
+    pan::log_DEBUG("REJECTED: Removing: ", oidbuf, " from orders");
+    _all_orders.erase(order->getClOid());
+}
+
 void 
 OrderManager::handleExecutionReport(capkproto::execution_report& er) 
 {
     timespec ts;
     capk::Order order;
     order.set(const_cast<capkproto::execution_report&>(er));
-    order_id_t cl_order_id = order.getOid();
+    order_id_t cl_order_id = order.getClOid();
 
 #ifdef LOG
     uuidbuf_t oidbuf;
@@ -148,7 +184,7 @@ OrderManager::handleExecutionReport(capkproto::execution_report& er)
 */
 
 #ifdef DEBUG
-    pan::log_DEBUG("Full execution report protobuf", er.DebugString());
+    pan::log_DEBUG("Full execution report protobuf:\n", er.DebugString());
 #endif
 
     // There are three FIX tags that relay the status of an order
@@ -177,88 +213,66 @@ OrderManager::handleExecutionReport(capkproto::execution_report& er)
     }
     
     
-    SharedOrderMapIter_t currentOrder = _all_orders.find(cl_order_id);
-    assert(currentOrder != _all_orders.end());
+    SharedOrderMapIter_t currentOrderIter = _all_orders.find(cl_order_id);
+    assert(currentOrderIter != _all_orders.end());
 
-    currentOrder->second->update(order);    
+    if (currentOrderIter == _all_orders.end()) {
+        pan::log_CRITICAL("Received unknown cl_order_id:", 
+                pan::blob(currentOrderIter->second->getClOid().get_uuid(), 
+                    currentOrderIter->second->getClOid().size()));
+    }
+    capk::Order_ptr_t currentOrder = currentOrderIter->second;
+    currentOrder->update(order);    
     
     if (execTransType == capk::EXEC_TRAN_NEW) {
         if (execType == capk::EXEC_TYPE_NEW) { 
-            assert(_pending_orders.find(cl_order_id) != _pending_orders.end());
-            // insert before we delete from pending
-            SharedOrderMapInsert_t insert = 
-                _working_orders.insert(SharedOrderMapValue_t(cl_order_id, currentOrder->second));
-            _pending_orders.erase(cl_order_id);
-            if (_callback_order_new) {
-                (*_callback_order_new)(static_cast<const void*>(currentOrder->second.get()));
-            }
+            pan::log_DEBUG("NEW ORDER");
+            _handle_exec_new(currentOrder);
         }
         else if (execType == capk::EXEC_TYPE_CANCELLED) {
-            SharedOrderMapIter_t currentOrder = _pending_orders.find(cl_order_id);
-            if (currentOrder == _pending_orders.end()) {
-                uuidbuf_t oidbuf;
-                cl_order_id.c_str(oidbuf);
-                uuidbuf_t origoidbuf;
-                orig_cl_order_id.c_str(origoidbuf);
-                pan::log_ALERT("Unknown cancel received for orig_cl_order_id:", origoidbuf, oidbuf);
-            }
-            else {
-                _working_orders.erase(orig_cl_order_id);
-                _pending_orders.erase(orig_cl_order_id);
-            }
+            pan::log_DEBUG("CANCEL");
+            _handle_exec_cancel(currentOrder);
         }
         else if (execType == capk::EXEC_TYPE_FILL) {
             pan::log_DEBUG("Received fill");
             if (ordStatus == capk::ORD_STATUS_FILL) {
                 pan::log_DEBUG("-- FULL FILL");
-                _working_orders.erase(cl_order_id);
+                currentOrder->set_state(OrderState_t::INT_STATE_FILLED);
             }
             else if (ordStatus == capk::ORD_STATUS_PARTIAL_FILL) {
                 pan::log_DEBUG("-- PARTIAL FILL");
+                currentOrder->set_state(OrderState_t::INT_STATE_PARTIALLY_FILLED);
             }
             handle_fill(order);
         }
         else if (execType == capk::EXEC_TYPE_PARTIAL_FILL) {
+            currentOrder->set_state(OrderState_t::INT_STATE_PARTIALLY_FILLED);
+            pan::log_DEBUG("-- PARTIAL FILL");
             handle_fill(order);
         }
         else if (execType == capk::EXEC_TYPE_REJECTED) {
-            assert(_pending_orders.find(cl_order_id) != _pending_orders.end());
-            _pending_orders.erase(cl_order_id);
-            if (_callback_order_reject) {
-                (*_callback_order_reject)(static_cast<const void*>(currentOrder->second.get()));
-            }
+            pan::log_DEBUG("REJECTED ");
+            _handle_exec_reject(currentOrder);
         }
         else if (execType == capk::EXEC_TYPE_PENDING_CANCEL) {
             pan::log_DEBUG("Received pending cancel");
+            currentOrder->set_state(OrderState_t::INT_STATE_PENDING_CANCEL);
         }
         else if (execType == capk::EXEC_TYPE_REPLACE) {
-            if (_pending_orders.find(cl_order_id) == _pending_orders.end()) {
-                uuidbuf_t oidbuf;
-                cl_order_id.c_str(oidbuf);
-                uuidbuf_t origoidbuf;
-                cl_order_id.c_str(origoidbuf);
-                pan::log_DEBUG("Replace is not pending for cl_order_id: ", oidbuf, "orig_cl_ord_id:", origoidbuf);
-            }
-            SharedOrderMapIter_t currentOrder = _working_orders.find(cl_order_id);
-            assert(currentOrder != _working_orders.end());
-            assert(_all_orders.find(cl_order_id) != _all_orders.end());
-            //*(currentOrder->second) = order; // KTK TODO - will this be OK? !!!! CHECK THIS
-            // set the new order id 
-            currentOrder->second->setOid(cl_order_id);
-            // delete order with key orig_cl_order_id from 
-            // working orders and re-insert with cl_order_id key
-            _working_orders.erase(currentOrder);
-            SharedOrderMapInsert_t insert = 
-                _working_orders.insert(SharedOrderMapValue_t(cl_order_id, currentOrder->second));
-
-            _pending_orders.erase(orig_cl_order_id);
+            currentOrder->set_state(OrderState_t::INT_STATE_REPLACED);
+            pan::log_DEBUG("REPLACE");
+            currentOrder->setClOid(cl_order_id);
         }
         else if (execType == capk::EXEC_TYPE_SUSPENDED) {
             uuidbuf_t oidbuf;
             cl_order_id.c_str(oidbuf);
             uuidbuf_t origoidbuf;
             orig_cl_order_id.c_str(origoidbuf);
-            pan::log_CRITICAL("Trade suspended - oid:", oidbuf, " orig_cl_ord_id: ", origoidbuf,
+            currentOrder->set_state(OrderState_t::INT_STATE_SUSPENDED);
+            pan::log_CRITICAL("Trade SUSPENDED - oid:", 
+                    oidbuf, 
+                    " orig_cl_ord_id: ", 
+                    origoidbuf,
                     " wait for promotion/demotion for trade");
         }
     }
@@ -267,13 +281,17 @@ OrderManager::handleExecutionReport(capkproto::execution_report& er)
         cl_order_id.c_str(oidbuf);
         uuidbuf_t origoidbuf;
         orig_cl_order_id.c_str(origoidbuf);
-        pan::log_ALERT("Unsolicited CANCEL (busted exec) request for oid: ", oidbuf, " orig_cl_ord_id: ", origoidbuf);
+        pan::log_ALERT("Unsolicited CANCEL (busted exec) request for oid: ", 
+                oidbuf, 
+                " orig_cl_ord_id: ", 
+                origoidbuf);
         pan::log_ALERT("New exec:", "price:", pan::real(order.getPrice()), 
                 "qty:", pan::real(order.getOrdQty()), 
                 "cum_qty:", pan::real(order.getCumQty()), 
                 "leaves_qty:", pan::real(order.getLeavesQty()), 
                 "avg_price:", pan::real(order.getAvgPrice()), 
                 "order_status:", pan::character((char)order.getOrdStatus()));
+        pan::log_ALERT("Incoming er protobuf:\n", er.DebugString());
     }
     else if (execTransType == capk::EXEC_TRAN_CORRECT) {
         uuidbuf_t oidbuf;
@@ -287,257 +305,19 @@ OrderManager::handleExecutionReport(capkproto::execution_report& er)
                 "leaves_qty:", pan::real(order.getLeavesQty()), 
                 "avg_price:", pan::real(order.getAvgPrice()), 
                 "order_status:", pan::character((char)order.getOrdStatus()));
-    }
-    else if (execTransType == capk::EXEC_TRAN_STATUS) {
-        pan::log_CRITICAL("UNSUPPORTED Received execTransType == capk::EXEC_TRAN_STATUS (", pan::character((char)execTransType), ")");
+        pan::log_ALERT("Incoming er protobuf:\n", er.DebugString());
     }
 
+    // KTK TODO - make function is_terminal_state() return 1/0 
     if (ordStatus == capk::ORD_STATUS_FILL ||
             ordStatus == capk::ORD_STATUS_CANCELLED ||
             ordStatus == capk::ORD_STATUS_REJECTED || 
             ordStatus == capk::ORD_STATUS_EXPIRED) {
         uuidbuf_t oidbuf;
         cl_order_id.c_str(oidbuf);
-        pan::log_DEBUG("Removing:", oidbuf, " from working orders");
-        _working_orders.erase(cl_order_id);
+        pan::log_DEBUG("Removing: ", oidbuf, " from orders");
+        _all_orders.erase(cl_order_id);
     }
-
-
-// Older version of code below that relies (incorrectly) on the order status rather 
-// than the execution type to determine the action to take
-#if 0
-    bool isNewItem;
-    if (ordStatus == capk::ORD_STATUS_NEW) {
-        assert(_working_orders.find(oid) == _working_orders.end());
-        // Can't assert this since not all exchanges send PENDING_NEW before
-        // sending ORDER_NEW
-        //assert(_pending_orders.find(oid) != _pending_orders.end());
-
-        SharedOrderMapInsert_t insert = 
-                _working_orders.insert(SharedOrderMapValue_t(oid, order));
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to working: ",
-                        pan::blob(oid.get_uuid(), oid.size()));
-        }
-        size_t num__pending_orders = _pending_orders.erase(oid);
-        pan::log_DEBUG("Remaining pending orders: ", pan::character(num__pending_orders));
-
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("NEW ",
-                        "OID: ", 
-                        pan::blob(oid.get_uuid(), oid.size()), 
-                        " ", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-    }
-
-    if (ordStatus == capk::ORD_STATUS_PARTIAL_FILL) {
-
-        if (order.getExecType() == capk::EXEC_TYPE_REPLACE) {
-            pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " replaced AND partially filled ");
-        }
-        SharedOrderMapIter_t orderIter = _working_orders.find(origOid);
-        // The below assertion will fail (right now) if the strategy receives 
-        // an update for an order which is not in its cache. This happens when 
-        // strategy crashes and is restarted WITHOUT reading working orders from 
-        // persistent storage. 
-        if (orderIter == _working_orders.end()) {
-            pan::log_CRITICAL("Received PARTIAL FILL for order NOT FOUND in working order cache");
-        }
-        (*orderIter).second = order;
-        _completed_orders.insert(SharedOrderMapValue_t(origOid, order));
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_INFORMATIONAL("PARTIAL FILL->",
-                        pan::blob(oid.get_uuid(), oid.size()), 
-                        ",", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        ",", 
-                        order.getExecId(), 
-                        ",", 
-                        pan::real(order.getLastShares()), 
-                        ",", 
-                        pan::real(order.getLastPrice()), 
-                        ",", 
-                        pan::real(order.getAvgPrice()), 
-                        ",", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-    }
-
-    if (ordStatus == capk::ORD_STATUS_FILL) {
-       if (order.getExecType() == capk::EXEC_TYPE_REPLACE) {
-           pan::log_NOTICE("OID: ", pan::blob(oid.get_uuid(), oid.size()),
-                   " replaced AND fully filled");
-       }
-       pan::log_INFORMATIONAL("FILL->",
-                        pan::blob(oid.get_uuid(), oid.size()), 
-                        ",", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        ",", 
-                        order.getExecId(), 
-                        ",", 
-                        pan::real(order.getLastShares()), 
-                        ",", 
-                        pan::real(order.getLastPrice()), 
-                        ",", 
-                        pan::real(order.getAvgPrice()), 
-                        ",", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-
-        SharedOrderMapInsert_t insert = 
-            _completed_orders.insert(SharedOrderMapValue_t(oid, order)); 
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to completed: ", 
-                    pan::blob(oid.get_uuid(), oid.size()));
-        }
-
-        // delete from working orders
-        SharedOrderMapIter_t orderIter = _working_orders.find(oid);
-        if (orderIter == _working_orders.end()) {
-            pan::log_CRITICAL("OID: ", 
-            pan::blob(oid.get_uuid(), oid.size()), 
-            " not found in working orders");
-        }
-        else {
-            pan::log_DEBUG("Deleting filled order from working orders");
-            _working_orders.erase(orderIter);
-        }
-    }
-
-    if (ordStatus == capk::ORD_STATUS_CANCELLED) {
-
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("ORIGOID: ", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " CLOID: (",pan::blob(oid.get_uuid(), oid.size()),")", 
-                        " CANCELLED ", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-
-        SharedOrderMapIter_t orderIter = _working_orders.find(origOid);  
-        if (orderIter != _working_orders.end()) {
-            pan::log_DEBUG("Deleting order from working orders");
-            _working_orders.erase(orderIter);
-        }
-        else {
-            pan::log_WARNING("ORIGOID: ", 
-                pan::blob(origOid.get_uuid(), origOid.size()), 
-                " cancelled but not found in working orders");
-            SharedOrderMapIter_t pendingIter = _pending_orders.find(origOid);
-            if (pendingIter != _pending_orders.end()) {
-                _pending_orders.erase(pendingIter);
-            }
-            else {
-                pan::log_WARNING("OID: ", 
-                    pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " cancelled but not found in working OR pending orders");
-            }
-        }
-    }
-
-    // origClOid is the original order that was replaced
-    // so now the new order has working order id of clOrdId 
-    // with the parameters that were sent in the replace msg
-    if (ordStatus == capk::ORD_STATUS_REPLACE) {
-
-        // insert the new order id which is in clOrdId NOT origClOid
-        SharedOrderMapInsert_t insert = 
-           _working_orders.insert(SharedOrderMapValue_t(oid, order)); 
-
-
-        SharedOrderMapIter_t orderIter = _working_orders.find(origOid);
-        // orig order must be found in working orders
-        assert(orderIter != _working_orders.end());
-        
-        // delete the old order id
-        _working_orders.erase(orderIter);
-
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("REPLACE", 
-                        "ORIGOID: ", 
-                        pan::blob(oid.get_uuid(), oid.size()), 
-                        "OID: ", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " ",
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-
- 
-    }
-
-    if (ordStatus == capk::ORD_STATUS_PENDING_CANCEL) {
-        // We had a partial fill while pending cancel - handle it
-        if (order.getExecType() == capk::EXEC_TYPE_PARTIAL_FILL) {
-            pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " partial fill while pending cancel");
-            _completed_orders.insert(SharedOrderMapValue_t(origOid, order));
-        }
-        SharedOrderMapInsert_t insert = 
-                _pending_orders.insert(SharedOrderMapValue_t(origOid, order));
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to pending: ",
-                        pan::blob(origOid.get_uuid(), origOid.size()));
-        }
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("OID: ", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " PENDING CANCEL (REALTIME) ", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
-            //(*((m.insert(value_type(k, data_type()))).first)).second
-    }
-    if (ordStatus == capk::ORD_STATUS_PENDING_REPLACE) {
-        if (order.getExecType() == capk::EXEC_TYPE_PARTIAL_FILL) {
-            pan::log_NOTICE("OID: ", pan::blob(origOid.get_uuid(), origOid.size()), 
-                    " partial fill while pending replace");
-            _completed_orders.insert(SharedOrderMapValue_t(origOid, order));
-        }
-        SharedOrderMapInsert_t insert = 
-                _pending_orders.insert(SharedOrderMapValue_t(origOid, order));
-        isNewItem = insert.second;
-        if (isNewItem) {
-            pan::log_DEBUG("Added to pending: ",
-                        pan::blob(origOid.get_uuid(), origOid.size()));
-        }
-
-        clock_gettime(CLOCK_REALTIME, &ts); 
-        pan::log_DEBUG("OID: ", 
-                        pan::blob(origOid.get_uuid(), origOid.size()), 
-                        " PENDING REPLACE (REALTIME) ", 
-                        pan::integer(ts.tv_sec), 
-                        ":", 
-                        pan::integer(ts.tv_nsec));
- 
-    }
-
-    if (ordStatus == capk::ORD_STATUS_REJECTED) {
-        pan::log_WARNING("REJECTED!!!! OID: ", pan::blob(oid.get_uuid(), oid.size()),
-                "ORIG OID: ", pan::blob(origOid.get_uuid(), origOid.size()));
-        SharedOrderMapIter_t orderIter = _pending_orders.find(origOid);
-        if (orderIter != _pending_orders.end()) {
-            pan::log_DEBUG("Deleting rejected order from pending");
-            _pending_orders.erase(orderIter);
-        }
-        else {
-            pan::log_DEBUG("Rejected order not found in pending");
-        }
-    }
-
-    //pan::log_DEBUG("Num pending orders: ", pan::integer(_pending_orders.size()));
-    //pan::log_DEBUG("Num working orders: ", pan::integer(_working_orders.size()));
-    //pan::log_DEBUG("Num completed orders: ", pan::integer(_completed_orders.size()));
-#endif
 }
 
 void
@@ -555,31 +335,8 @@ OrderManager::handleOrderCancelReject(capkproto::order_cancel_reject& ocr)
             " cancel rejected - full msg follows\n", 
             ocr.DebugString());
 #endif
-/*
-    SharedOrderMapIter_t pendingIter = _pending_orders.find(oid);
-    if (orderIter == _pending_orders.end()) {
-        pan::log_DEBUG("OID: ", 
-                pan::blob(oid.get_uuid(), oid.size()), 
-                " not found in pending orders");
-    }
-    else {
-        _pending_orders.erase(orderIter);
-    }
-
-    SharedOrderMapIter_t workingIter = _working_orders.find(oid);
-    if (orderIter == _working_orders.end()) {
-        pan::log_DEBUG("OID: ", 
-                pan::blob(oid.get_uuid(), oid.size()), 
-                " not found in pending orders");
-    }
-    else {
-        _working_orders.erase(orderIter);
-    }
-*/
 #ifdef LOG
-    pan::log_DEBUG("Num pending orders: ", pan::integer(_pending_orders.size()));
-    pan::log_DEBUG("Num working orders: ", pan::integer(_working_orders.size()));
-    pan::log_DEBUG("Num completed orders: ", pan::integer(_completed_orders.size()));
+    pan::log_DEBUG("ORDER COUNT (all): ", pan::integer(_all_orders.size()));
 #endif
 }
 
@@ -626,6 +383,10 @@ OrderManager::receiveOrder(zmq::socket_t* sock)
     return false;
 }
 
+
+/*
+ * Must check for is_empty on return
+ */
 order_id_t
 OrderManager::send_new_order(const venue_id_t& venue_id, 
         const char* symbol,
@@ -650,9 +411,9 @@ OrderManager::send_new_order(const venue_id_t& venue_id,
         nos.set_ord_type(capkproto::LIM);
         nos.set_time_in_force(capkproto::GFD);
 
-        order_id_t order_id;
-        this->get_new_order_id(&order_id);
-        nos.set_cl_order_id(order_id.get_uuid(), order_id.size());
+        order_id_t cl_order_id;
+        this->get_new_order_id(&cl_order_id);
+        nos.set_cl_order_id(cl_order_id.get_uuid(), cl_order_id.size());
 /*
         assert(!order_id.is_empty());
         nos.set_order_id(order_id.get_uuid(), order_id.size());
@@ -660,33 +421,27 @@ OrderManager::send_new_order(const venue_id_t& venue_id,
         // send the order to the order interface
         capk::snd_NEW_ORDER(this->_order_interface, 
                 this->_sid, 
-                order_id,
+                cl_order_id,
                 venue_id, 
                 nos);
 
-        capk::Order_ptr_t order_ptr = boost::make_shared<Order>(order_id);
+        capk::Order_ptr_t order_ptr = boost::make_shared<Order>(cl_order_id);
         order_ptr->set(nos);
-        SharedOrderMapValue_t new_map_pair(order_id, order_ptr);
-        SharedOrderMapInsert_t insert = 
-            _pending_orders.insert(new_map_pair);
-        assert(insert.second);
-        if (insert.second != true) {
-            pan::log_ALERT("Adding new order to pending failed!");
-        }
-
-        insert = 
+        order_ptr->set_state(OrderState_t::INT_STATE_PENDING_NEW);
+        SharedOrderMapValue_t new_map_pair(cl_order_id, order_ptr);
+        SharedOrderMapInsert_t newInsert = 
             _all_orders.insert(new_map_pair);
-        assert(insert.second);
-        if (insert.second != true) {
+        assert(newInsert.second);
+        if (newInsert.second != true) {
             pan::log_ALERT("Adding new order to all_orders failed!");
         }
 
-        return order_id;
+        return cl_order_id;
     }
     else {
         pan::log_CRITICAL("send_new_order - order interface is NULL");
-        capk::order_id_t o;
-        return o;
+        capk::order_id_t empty_order_id;
+        return empty_order_id;
         // must check for is_empty on return
     }
 }
@@ -715,7 +470,7 @@ OrderManager::send_cancel(const capk::venue_id_t& venue_id,
         order_id_t cl_order_id(false);
         this->get_new_order_id(&cl_order_id);
         oc.set_cl_order_id(cl_order_id.get_uuid(), cl_order_id.size());
-        oc.set_orig_order_id(orig_cl_order_id.get_uuid(), orig_cl_order_id.size());
+        oc.set_orig_cl_order_id(orig_cl_order_id.get_uuid(), orig_cl_order_id.size());
 
         capk::snd_ORDER_CANCEL(this->_order_interface, 
                 this->_sid, 
@@ -736,20 +491,26 @@ OrderManager::send_cancel(const capk::venue_id_t& venue_id,
             pan::log_ALERT("send_cancel - orig_cl_order_id is not currently live");
         }
         */
+        capk::Order_ptr_t order_ptr = boost::make_shared<Order>(cl_order_id);
+        // No need to set the order to contain the entire protobuf since we're just
+        // using the entry of this order to keep track of the fact that we sent the 
+        // cancel request
+        //order_ptr->set(nos);
+        order_ptr->set_state(OrderState_t::INT_STATE_PENDING_CANCEL);
+        SharedOrderMapValue_t new_map_pair(cl_order_id, order_ptr);
+        SharedOrderMapInsert_t newInsert = 
+            _all_orders.insert(new_map_pair);
+        assert(newInsert.second);
+        if (newInsert.second != true) {
+            pan::log_ALERT("Adding new order to all_orders failed!");
+        }
 
         SharedOrderMapIter_t cancelOrder = _all_orders.find(orig_cl_order_id);
         assert(cancelOrder != _all_orders.end());
         if (cancelOrder == _all_orders.end()) {
             pan::log_ALERT("send_cancel - orig_cl_order_id not found in all orders");
         }
-
-        SharedOrderMapValue_t cancel_order(cl_order_id, cancelOrder->second);
-        SharedOrderMapInsert_t insert = 
-            _pending_orders.insert(cancel_order);
-        assert(insert.second);
-        if (insert.second != true) {
-            pan::log_ALERT("send_cancel - adding cancel order to pending failed!");
-        }
+        cancelOrder->second->set_state(OrderState_t::INT_STATE_PENDING_CANCEL);
 
         return cl_order_id;
     }
@@ -784,7 +545,7 @@ OrderManager::send_cancel_replace(const capk::venue_id_t& venue_id,
         order_id_t cl_order_id;
         this->get_new_order_id(&cl_order_id);
         ocr.set_cl_order_id(cl_order_id.get_uuid(), cl_order_id.size());
-        ocr.set_orig_order_id(orig_cl_order_id.get_uuid(), orig_cl_order_id.size());
+        ocr.set_orig_cl_order_id(orig_cl_order_id.get_uuid(), orig_cl_order_id.size());
         
         capk::snd_ORDER_CANCEL_REPLACE(this->_order_interface, 
                 this->_sid, 
@@ -793,17 +554,13 @@ OrderManager::send_cancel_replace(const capk::venue_id_t& venue_id,
                 venue_id, 
                 ocr);
 
-        SharedOrderMapIter_t workingOrder = _working_orders.find(orig_cl_order_id);
-        if (workingOrder == _working_orders.end()) {
-            pan::log_ALERT("send_cancel_replace - orig_cl_order_id is not currently live");
-        }
-
-        // Maybe don't need the all orders check but OK for now. 
         SharedOrderMapIter_t cancelReplaceOrder = _all_orders.find(orig_cl_order_id);
         assert(cancelReplaceOrder != _all_orders.end());
         if (cancelReplaceOrder == _all_orders.end()) {
-            pan::log_ALERT("send_cancel_replace - orig_cl_order_id not found in all orders");
+            pan::log_ALERT("send_cancel_replace - orig_cl_order_id not found in all orders",
+                    pan::blob(orig_cl_order_id.get_uuid(), orig_cl_order_id.size()));
         }
+        cancelReplaceOrder->second->set_state(OrderState_t::INT_STATE_PENDING_REPLACE);
 
         // KTK - NB in the optimistic scenario that we're supposed to operate under 
         // we should just change working order id in the working orders but if the cancel
@@ -814,23 +571,6 @@ OrderManager::send_cancel_replace(const capk::venue_id_t& venue_id,
         // Note that some venues don't support cancel/replace and only support cancel in 
         // which case the semantics still hold.
         // FIX needs to be FIXED. 
-        SharedOrderMapValue_t replace_order(cl_order_id, cancelReplaceOrder->second);
-        SharedOrderMapInsert_t insert = 
-            _pending_orders.insert(replace_order);
-        assert(insert.second);
-        if (insert.second != true) {
-            pan::log_ALERT("send_cancel_replace - adding cancel replace order to pending failed!");
-        }
-/*
-        insert = 
-            _all_orders.insert(new_order);
-        assert(insert.second);
-        if (insert.second != true) {
-            pan::log_ALERT("Adding new order to all_orders failed!");
-        }
-*/
-
-
 
         return cl_order_id;
     }
