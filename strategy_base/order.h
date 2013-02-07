@@ -24,8 +24,8 @@ class Order
 {
 	public: 
 /* 
-        Order() : _oid(false) { };
-		Order(order_id_t& oid): _oid(oid) { };
+        Order() : _clOid(false) { };
+		Order(order_id_t& oid): _clOid(oid) { };
 		Order(const Order& o) {
             std::cerr << "COPY CTOR Order(const Order& rhs)" << std::endl;
         };
@@ -46,12 +46,14 @@ class Order
 		~Order(); 	
 
         void set(const capkproto::execution_report& er);
-        void set(const capkproto::new_order_single& er);
+        void set(const capkproto::new_order_single& nos);
+        void set(const capkproto::order_cancel_replace& ocr);
 
         void update(const Order& order);
 
-        order_id_t getOid() const { return _oid;}
+        order_id_t getClOid() const { return _clOid;}
         order_id_t getOrigClOid() const  { return _origClOid;}
+        venue_id_t getVenueId() const { return _venue_id;}
         const char* getExecId() const { return _execId;}
         ExecTransType_t getExecTransType() const { return _execTransType;}
         OrdStatus_t getOrdStatus() const { return _ordStatus;}
@@ -74,17 +76,21 @@ class Order
         HandlInst_t getHandlInst() const { return _handlInst;}
         OrdRejectReason_t getOrdRejectReason() const { return _ordRejReason;}
         double getMinQty() const { return _minQty;}
+        ExecRestatementReason_t getExecRestatementReason() const { return _exec_restatement_reason;}
+        const char* getExecRefId() const { return _exec_ref_id;}
 
-        void setOid(const order_id_t& oid) { this->_oid = oid;}
+        void setClOid(const order_id_t& oid) { this->_clOid = oid;}
+        void set_state(const OrderState_t new_state) { this->_state = new_state;} 
 
         friend std::ostream& operator << (std::ostream& out, const Order& o);
 
 	private: 
-        void assign(const capk::Order&);
+        bool operator==(const Order& rhs);
+        void _assign(const capk::Order&);
 
-		order_id_t _oid;
-        venue_id_t _venue_id;
+		order_id_t _clOid;
 		order_id_t _origClOid;
+        venue_id_t _venue_id;
 		char _execId[EXEC_ID_LEN];	
 		ExecTransType_t _execTransType;
 		OrdStatus_t _ordStatus;
@@ -110,6 +116,7 @@ class Order
         double _minQty;
         ExecRestatementReason_t _exec_restatement_reason;
         char _exec_ref_id[EXEC_REF_ID_LEN];
+        OrderState_t _state;
 		
 
 };

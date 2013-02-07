@@ -2,9 +2,9 @@
 
 namespace capk {
 
-Order::Order() : _oid(false), 
-        _venue_id(false),
+Order::Order() : _clOid(false), 
 		_origClOid(false),
+        _venue_id(false),
 		_execId({0}),
         _execTransType(ExecTransType_t::NO_EXEC_TRAN),
         _ordStatus(OrdStatus_t::NO_ORD_STATUS),
@@ -29,12 +29,42 @@ Order::Order() : _oid(false),
         _ordRejReason(-1),
         _minQty(0),
         _exec_restatement_reason(-1),
-        _exec_ref_id({0})
+        _exec_ref_id({0}),
+        _state(OrderState_t::INT_STATE_UNINIT)
 {
     // _transactTime()
 };
 
-Order::Order(order_id_t& oid): _oid(oid) 
+Order::Order(order_id_t& oid): _clOid(oid),
+		_origClOid(false),
+        _venue_id(false),
+		_execId({0}),
+        _execTransType(ExecTransType_t::NO_EXEC_TRAN),
+        _ordStatus(OrdStatus_t::NO_ORD_STATUS),
+        _execType(ExecType_t::NO_EXEC_TYPE),
+		_symbol({0}),
+        _secType({0}),
+        _account({0}), 
+		_side(Side_t::NO_SIDE),
+		_orderQty(0),
+        _ordType(0), 
+		_price(0),
+		_lastShares(0),
+		_lastPrice(0),
+		_leavesQty(0),
+		_cumQty(0),
+		_avgPrice(0),
+        _timeInForce(0),
+        _transactTime(),
+        _transactTimeStr(""),
+        _execInstStr(""),
+        _handlInst(0),
+        _ordRejReason(-1),
+        _minQty(0),
+        _exec_restatement_reason(-1),
+        _exec_ref_id({0}),
+        _state(OrderState_t::INT_STATE_UNINIT)
+
 { 
 
 };
@@ -43,7 +73,7 @@ Order::Order(order_id_t& oid): _oid(oid)
 Order::Order(const Order& o) 
 {
     pan::log_DEBUG("COPY CTOR Order(const Order& rhs)");
-    assign(o);
+    _assign(o);
 };
 
 Order& 
@@ -52,7 +82,7 @@ Order::operator=(const Order& rhs)
     if (&rhs == this) {
         return *this;
     }
-    assign(rhs);
+    _assign(rhs);
     pan::log_DEBUG("ASSGN OPR Order& operator=(const Order& rhs)");
     return *this;
 
@@ -62,7 +92,7 @@ Order::operator=(const Order& rhs)
 bool
 Order::operator==(const Order& rhs) const 
 {
-    return (this == &rhs || this->_oid == rhs.getOid());
+    return (this == &rhs || this->_clOid == rhs.getOid());
 }
 */
 
@@ -75,12 +105,10 @@ Order::~Order()
 void
 Order::set(const capkproto::execution_report& er) 
 {
-    _oid.set(er.cl_order_id().c_str(), er.cl_order_id().size());
-    //_oid.parse(er.cl_order_id().c_str());
+    _clOid.set(er.cl_order_id().c_str(), er.cl_order_id().size());
     if (er.has_orig_cl_order_id()) {
         _origClOid.set(er.orig_cl_order_id().c_str(), er.orig_cl_order_id().size());
     }
-    //_origClOid.parse(er.orig_cl_order_id().c_str());
     memcpy(_execId, er.exec_id().c_str(), er.exec_id().size());
     _execTransType = static_cast<capk::ExecTransType_t>(er.exec_trans_type());
     _ordStatus = static_cast<capk::OrdStatus_t>(er.order_status());
@@ -105,16 +133,13 @@ Order::set(const capkproto::execution_report& er)
     _avgPrice = er.avg_price();
     _timeInForce = er.time_in_force();
     _transactTimeStr = er.transact_time();
-    //FIXConverters::UTCTimestampStringToTimespec(_strTransactTime, &_transactTime);
     _execInstStr = er.exec_inst();
     _handlInst = er.handl_inst();
     _ordRejReason = er.order_reject_reason();
     _minQty = er.min_qty();
     _venue_id = er.venue_id();
-    assert(er.account().size() < ACCOUNT_LEN);
-    memcpy(_account, er.account().c_str(), er.exec_ref_id().size());
-    assert(er.exec_ref_id().size() < ACCOUNT_LEN);
-    memcpy(_exec_ref_id, er.exec_ref_id().c_str(), er.exec_ref_id().size());
+    memcpy(_account, er.account().c_str(), ACCOUNT_LEN-1);
+    memcpy(_exec_ref_id, er.exec_ref_id().c_str(), EXEC_REF_ID_LEN-1);
     _exec_restatement_reason = er.exec_restatement_reason();
 
 };
@@ -122,7 +147,7 @@ Order::set(const capkproto::execution_report& er)
 void
 Order::set(const capkproto::new_order_single& nos)
 {
-    _oid.set(nos.cl_order_id().c_str(), nos.cl_order_id().size());
+    _clOid.set(nos.cl_order_id().c_str(), nos.cl_order_id().size());
     memcpy(_symbol, nos.symbol().c_str(), nos.symbol().size());
     capkproto::side_t side = nos.side();
     if (side == capkproto::BID) {
@@ -142,12 +167,38 @@ Order::set(const capkproto::new_order_single& nos)
 }
 
 void
+Order::set(const capkproto::order_cancel_replace& ocr)
+{
+    _origClOid.set(ocr.orig_cl_order_id().c_str(), ocr.orig_cl_order_id().size());
+    _clOid.set(ocr.cl_order_id().c_str(), ocr.cl_order_id().size());
+    _orderQty = ocr.order_qty();
+    _price = ocr.price();
+    _transactTimeStr = ocr.transact_time();
+    _ordType = ocr.ord_type();
+    _timeInForce = ocr.time_in_force();
+}
+
+
+/*
+ * Used after an order update is received - 
+ * should only update fields that may change during and execution 
+ */
+void
 Order::update(const Order& o)
 {
+    // Don't set the following fields when updating:
+    // _clOid 
+    // _origClOid
+    // _venue_id
+    // since they should not change when updating an order
     memcpy(this->_execId, o.getExecId(), EXEC_ID_LEN);
     this->_execTransType = o.getExecTransType();
     this->_ordStatus = o.getOrdStatus();
     this->_execType = o.getExecType();
+    // _symbol
+    // _secType
+    // _account
+    // _side
     this->_orderQty = o.getOrdQty();
     this->_ordType = o.getOrdType();
     this->_price = o.getPrice();
@@ -156,18 +207,24 @@ Order::update(const Order& o)
     this->_leavesQty = o.getLeavesQty();
     this->_cumQty = o.getCumQty();
     this->_avgPrice = o.getAvgPrice();
+    // _timeInForce
     this->_transactTime = o.getTransactTime();
     this->_transactTimeStr = o.getTransactTimeStr();
-    this->_handlInst = o.getHandlInst();
+    // _execInstStr
+    //this->_handlInst = o.getHandlInst();
     this->_ordRejReason = o.getOrdRejectReason();
     this->_minQty = o.getMinQty();
+    this->_exec_restatement_reason = o.getExecRestatementReason();
+    memcpy(this->_exec_ref_id, o.getExecRefId(), EXEC_REF_ID_LEN);
+    // _state
 }
 
 void
-Order::assign(const Order& o)
+Order::_assign(const Order& o)
 {
-    this->_oid = o.getOid();
+    this->_clOid = o.getClOid();
     this->_origClOid = o.getOrigClOid();
+    this->_venue_id = o.getVenueId();
     memcpy(this->_execId, o.getExecId(), EXEC_ID_LEN);
     this->_execTransType = o.getExecTransType();
     this->_ordStatus = o.getOrdStatus();
@@ -190,12 +247,14 @@ Order::assign(const Order& o)
     this->_handlInst = o.getHandlInst();
     this->_ordRejReason = o.getOrdRejectReason();
     this->_minQty = o.getMinQty();
+    this->_exec_restatement_reason = o.getExecRestatementReason();
+    memcpy(this->_exec_ref_id, o.getExecRefId(), EXEC_REF_ID_LEN);
 }
 
 std::ostream& operator << (std::ostream& out, const Order& o) {
     uuidbuf_t oidbuf;
     uuidbuf_t origoidbuf;
-    o.getOid().c_str(oidbuf);
+    o.getClOid().c_str(oidbuf);
     o.getOrigClOid().c_str(origoidbuf);
     out << "Order:\n"
         << "cl_order_id=" << oidbuf
