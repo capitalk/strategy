@@ -320,7 +320,7 @@ snd_ORDER_CANCEL_REPLACE(zmq::socket_t* order_interface,
 	pan::log_DEBUG("CANCEL REPLACE: Received cl_order_id: ", cl_order_id.c_str(oidbuf));
 #endif
 	ocr.set_cl_order_id(cl_order_id.get_uuid(), cl_order_id.size());	
-	ocr.set_orig_order_id(orig_order_id.get_uuid(), orig_order_id.size());	
+	ocr.set_orig_cl_order_id(orig_order_id.get_uuid(), orig_order_id.size());	
 
 	size_t msgsize = ocr.ByteSize();
 	assert(msgsize < sizeof(msgbuf));
@@ -477,7 +477,7 @@ snd_ORDER_CANCEL(zmq::socket_t* order_interface,
 #endif
     // set the order ids in the msg
 	oc.set_cl_order_id(cl_order_id.get_uuid(), cl_order_id.size());	
-	oc.set_orig_order_id(orig_order_id.get_uuid(), orig_order_id.size());	
+	oc.set_orig_cl_order_id(orig_order_id.get_uuid(), orig_order_id.size());	
 
 	size_t msgsize = oc.ByteSize();
 	assert(msgsize < sizeof(msgbuf));
