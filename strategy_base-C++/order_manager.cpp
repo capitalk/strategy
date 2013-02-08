@@ -1,4 +1,5 @@
 #include "order_manager.h"
+#include "strategy_protocol.h"
 
 
 #include <zmq.hpp>
@@ -23,7 +24,6 @@
 #include "utils/types.h"
 #include "utils/venue_globals.h"
 
-#include "strategy_base/strategy_protocol.h"
 
 using google::dense_hash_map;
 

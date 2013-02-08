@@ -5,6 +5,7 @@
 #include <zmq.hpp>
 #include <signal.h>
 
+#include "strategy_protocol.h"
 
 #include "google/dense_hash_map"
 
@@ -39,7 +40,6 @@
 #include "utils/types.h"
 #include "utils/venue_globals.h"
 
-#include "strategy_base/strategy_protocol.h"
 
 typedef void (*handler_t)(const void*);
 
