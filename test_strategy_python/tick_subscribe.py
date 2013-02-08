@@ -1,8 +1,8 @@
 import zmq
 import proto_objs.spot_fx_md_1_pb2
 import proto_objs.venue_configuration_pb2
-import capk_core_python.configuration_server
-from capk_core_python.configuration_server import Configuration
+import strategy_base_python.configuration_server
+from strategy_base_python.configuration_server import Configuration
 
 # Create context and connect
 context = zmq.Context()
@@ -66,9 +66,14 @@ if __name__ == '__main__':
 
     parser.add_argument('-v', '--venue', 
             dest='venue_id',
-            help='listen to aggregated book feed')
+            help='listen to specified venue_id only')
 
     args = parser.parse_args()
+
+    if args.aggregated_market_subscription is False and args.venue_id is None:
+        print "\nYou must choose either aggregated book or supply a venue id\n"
+        parser.print_help();
+        exit(-1)
 
     config = Configuration(context)
     config.connect(args.config_server)
@@ -95,8 +100,7 @@ if __name__ == '__main__':
         run(direct=False, connect_addr=global_config.aggregated_bbo_book_addr)
     else:
         print parser.print_help();
-
-    exit
+        exit
 
 
 
