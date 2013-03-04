@@ -15,7 +15,7 @@ PANTHEIOS_EXT=$(ROOT)/pantheios_be_zmq
 
 BOOST=/usr/local/boost
 STRATEGY_BASE=..
-STRATEGY_BASE_SRC=../strategy_base-C++
+STRATEGY_BASE_SRC=../strategy_base_C++
 
 INCLUDE= -I $(COMMON) \
 		 -I $(UTILS) \

@@ -19,13 +19,13 @@
 #include "proto/order_cancel_replace.pb.h"
 #include "proto/spot_fx_md_1.pb.h"
 
-#include "strategy_base/client_order_interface.h"
-#include "strategy_base/client_market_data_interface.h"
-#include "strategy_base/order_mux.h"
-#include "strategy_base/market_data_mux.h"
-#include "strategy_base/order.h"
-#include "strategy_base/strategy_protocol.h"
-#include "strategy_base/order_manager.h"
+#include "strategy_base_C++/client_order_interface.h"
+#include "strategy_base_C++/client_market_data_interface.h"
+#include "strategy_base_C++/order_mux.h"
+#include "strategy_base_C++/market_data_mux.h"
+#include "strategy_base_C++/order.h"
+#include "strategy_base_C++/strategy_protocol.h"
+#include "strategy_base_C++/order_manager.h"
 
 #include "utils/logging.h"
 #include "utils/timing.h"
@@ -114,7 +114,7 @@ query_cancel()
     capk::order_id_t origoid;
 	ret = origoid.parse(str_origoid.c_str());
     assert(ret == 0);
-	oc.set_orig_order_id(origoid.get_uuid(), origoid.size());
+	oc.set_orig_cl_order_id(origoid.get_uuid(), origoid.size());
 
 	// symbol
 	std::string str_symbol;
@@ -165,7 +165,7 @@ query_cancel_replace()
     capk::order_id_t origoid;
 	ret = origoid.parse(str_origoid.c_str());
     assert(ret == 0);
-	ocr.set_orig_order_id(origoid.get_uuid(), origoid.size());
+	ocr.set_orig_cl_order_id(origoid.get_uuid(), origoid.size());
 
 	// order type
 	ocr.set_ord_type(capkproto::LIM);
